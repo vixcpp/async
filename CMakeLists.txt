@@ -6,27 +6,21 @@ project(cnerium
   LANGUAGES CXX
 )
 
-# ----------------------------------------
 # Options + helpers
-# ----------------------------------------
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 include(CneriumOptions)
 include(CneriumWarnings)
 include(CneriumSanitizers)
 
-# ----------------------------------------
 # Dependency options
-# ----------------------------------------
 option(CNERIUM_USE_BUNDLED_ASIO "Use vendored Asio from third_party/asio" ON)
 set(CNERIUM_ASIO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_party/asio"
   CACHE PATH "Path to vendored Asio repository root"
 )
 
-# ----------------------------------------
-# Asio setup (no network)
+# Asio setup
 # Creates target: asio::asio
-# ----------------------------------------
 add_library(asio::asio INTERFACE IMPORTED GLOBAL)
 
 if(CNERIUM_USE_BUNDLED_ASIO)
@@ -76,9 +70,7 @@ if(UNIX AND NOT APPLE)
   target_link_libraries(asio::asio INTERFACE pthread)
 endif()
 
-# ----------------------------------------
 # Library target
-# ----------------------------------------
 add_library(cnerium)
 add_library(cnerium::cnerium ALIAS cnerium)
 
@@ -117,28 +109,23 @@ target_sources(cnerium
       include/cnerium/core/thread_pool.hpp
       include/cnerium/core/error.hpp
       include/cnerium/core/spawn.hpp
+      include/cnerium/core/when.hpp
 )
 
 # Link Asio target
 target_link_libraries(cnerium PUBLIC asio::asio)
 
-# ----------------------------------------
 # Warnings / sanitizers
-# ----------------------------------------
 cnerium_apply_warnings(cnerium)
 cnerium_apply_sanitizers(cnerium)
 
-# ----------------------------------------
 # Build settings
-# ----------------------------------------
 set_target_properties(cnerium PROPERTIES
   CXX_EXTENSIONS OFF
   POSITION_INDEPENDENT_CODE ON
 )
 
-# ----------------------------------------
 # Tests / Examples
-# ----------------------------------------
 include(CTest)
 
 if(CNERIUM_BUILD_TESTS)
@@ -150,9 +137,7 @@ if(CNERIUM_BUILD_EXAMPLES)
   add_subdirectory(examples)
 endif()
 
-# ----------------------------------------
 # Install + export (for find_package)
-# ----------------------------------------
 include(GNUInstallDirs)
 
 install(

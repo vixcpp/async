@@ -33,3 +33,14 @@ add_executable(cnerium_example_02_thread_pool
 target_link_libraries(cnerium_example_02_thread_pool PRIVATE cnerium::cnerium)
 cnerium_apply_warnings(cnerium_example_02_thread_pool)
 cnerium_apply_sanitizers(cnerium_example_02_thread_pool)
+
+add_executable(cnerium_example_04_when_all_any
+  when_all_any.cpp
+)
+
+target_link_libraries(cnerium_example_04_when_all_any
+  PRIVATE cnerium::cnerium
+)
+
+cnerium_apply_warnings(cnerium_example_04_when_all_any)
+cnerium_apply_sanitizers(cnerium_example_04_when_all_any)

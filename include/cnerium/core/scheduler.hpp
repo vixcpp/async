@@ -33,6 +33,31 @@ namespace cnerium::core
            { if (h) h.resume(); });
     }
 
+    // Awaitable: hop onto the scheduler thread.
+    // Usage inside a coroutine:
+    //   co_await sched.schedule();
+    struct schedule_awaitable
+    {
+      scheduler *s{};
+
+      bool await_ready() const noexcept { return false; }
+
+      void await_suspend(std::coroutine_handle<> h) const noexcept
+      {
+        if (!s)
+        {
+          if (h)
+            h.resume();
+          return;
+        }
+        s->post(h);
+      }
+
+      void await_resume() const noexcept {}
+    };
+
+    schedule_awaitable schedule() noexcept { return schedule_awaitable{this}; }
+
     void run()
     {
       running_ = true;
@@ -58,9 +83,7 @@ namespace cnerium::core
         }
 
         if (j.fn)
-        {
           j.fn();
-        }
       }
 
       running_ = false;
@@ -101,7 +124,7 @@ namespace cnerium::core
       struct fn_impl final : fn_base
       {
         Fn f;
-        explicit fn_impl(Fn &&x) : f(std::move(x)) {}
+        explicit fn_impl(Fn x) : f(std::move(x)) {}
         void call() override { f(); }
       };
 
@@ -112,7 +135,8 @@ namespace cnerium::core
         template <typename Fn>
         explicit fn_holder(Fn &&f)
         {
-          ptr = new fn_impl<std::decay_t<Fn>>(std::forward<Fn>(f));
+          using D = std::decay_t<Fn>;
+          ptr = new fn_impl<D>(D(std::forward<Fn>(f)));
         }
 
         fn_holder(fn_holder &&o) noexcept : ptr(o.ptr) { o.ptr = nullptr; }

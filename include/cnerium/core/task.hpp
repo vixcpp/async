@@ -7,6 +7,8 @@
 #include <utility>
 #include <cassert>
 
+#include <cnerium/core/scheduler.hpp>
+
 namespace cnerium::core
 {
 
@@ -24,13 +26,23 @@ namespace cnerium::core
 
       struct final_awaiter
       {
-        bool await_ready() noexcept { return false; }
+        bool await_ready() noexcept
+        {
+          return false;
+        }
 
         template <typename Promise>
         std::coroutine_handle<> await_suspend(std::coroutine_handle<Promise> h) noexcept
         {
           auto cont = h.promise().continuation;
-          return cont ? cont : std::noop_coroutine();
+
+          if (!cont)
+          {
+            h.destroy();
+            return std::noop_coroutine();
+          }
+
+          return cont;
         }
 
         void await_resume() noexcept {}
@@ -65,7 +77,6 @@ namespace cnerium::core
     struct promise_value<void> : promise_common
     {
       task<void> get_return_object() noexcept;
-
       void return_void() noexcept {}
     };
 
@@ -82,7 +93,7 @@ namespace cnerium::core
       std::coroutine_handle<> await_suspend(std::coroutine_handle<> awaiting) noexcept
       {
         h.promise().continuation = awaiting;
-        return h; // transfer control to the task coroutine
+        return h;
       }
 
       decltype(auto) await_resume()
@@ -98,8 +109,6 @@ namespace cnerium::core
         }
         else
         {
-          // If no exception happened, we require a value.
-          // Use assert to keep this lightweight for v0.
           assert(p.value.has_value());
           return std::move(*(p.value));
         }
@@ -116,13 +125,9 @@ namespace cnerium::core
     using handle_type = std::coroutine_handle<promise_type>;
 
     task() noexcept = default;
-
     explicit task(handle_type h) noexcept : h_(h) {}
 
-    task(task &&other) noexcept : h_(other.h_)
-    {
-      other.h_ = {};
-    }
+    task(task &&other) noexcept : h_(other.h_) { other.h_ = {}; }
 
     task &operator=(task &&other) noexcept
     {
@@ -143,17 +148,32 @@ namespace cnerium::core
     bool valid() const noexcept { return static_cast<bool>(h_); }
     explicit operator bool() const noexcept { return valid(); }
 
-    auto operator co_await() & noexcept
-    {
-      return detail::task_awaiter<promise_type>{h_};
-    }
-
-    auto operator co_await() && noexcept
-    {
-      return detail::task_awaiter<promise_type>{h_};
-    }
+    auto operator co_await() & noexcept { return detail::task_awaiter<promise_type>{h_}; }
+    auto operator co_await() && noexcept { return detail::task_awaiter<promise_type>{h_}; }
 
     handle_type handle() const noexcept { return h_; }
+
+    // Start this task on a scheduler thread.
+    // Important: this consumes the task object (rvalue) because the task must stay alive
+    // while running. So you typically do:
+    //   auto t = foo();
+    //   std::move(t).start(sched);
+    void start(scheduler &s) && noexcept
+    {
+      auto h = h_;
+      h_ = {};
+      if (h)
+        s.post(h);
+    }
+
+    void start(scheduler &sched) && noexcept
+    {
+      if (!h_)
+        return;
+
+      sched.post(std::coroutine_handle<>(h_));
+      h_ = {};
+    }
 
   private:
     void destroy() noexcept
@@ -176,13 +196,9 @@ namespace cnerium::core
     using handle_type = std::coroutine_handle<promise_type>;
 
     task() noexcept = default;
-
     explicit task(handle_type h) noexcept : h_(h) {}
 
-    task(task &&other) noexcept : h_(other.h_)
-    {
-      other.h_ = {};
-    }
+    task(task &&other) noexcept : h_(other.h_) { other.h_ = {}; }
 
     task &operator=(task &&other) noexcept
     {
@@ -203,17 +219,27 @@ namespace cnerium::core
     bool valid() const noexcept { return static_cast<bool>(h_); }
     explicit operator bool() const noexcept { return valid(); }
 
-    auto operator co_await() & noexcept
-    {
-      return detail::task_awaiter<promise_type>{h_};
-    }
-
-    auto operator co_await() && noexcept
-    {
-      return detail::task_awaiter<promise_type>{h_};
-    }
+    auto operator co_await() & noexcept { return detail::task_awaiter<promise_type>{h_}; }
+    auto operator co_await() && noexcept { return detail::task_awaiter<promise_type>{h_}; }
 
     handle_type handle() const noexcept { return h_; }
+
+    void start(scheduler &s) && noexcept
+    {
+      auto h = h_;
+      h_ = {};
+      if (h)
+        s.post(h);
+    }
+
+    void start(scheduler &sched) && noexcept
+    {
+      if (!h_)
+        return;
+
+      sched.post(std::coroutine_handle<>(h_));
+      h_ = {};
+    }
 
   private:
     void destroy() noexcept
