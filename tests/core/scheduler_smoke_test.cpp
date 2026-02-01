@@ -21,8 +21,9 @@ int main()
              { counter.fetch_add(1); });
 
   // Run the event loop in another thread
-  std::thread loop([&]()
-                   { sched.run(); });
+  std::thread loop(
+      [&]()
+      { sched.run(); });
 
   // Thread-safe post from main thread
   for (int i = 0; i < 10; ++i)

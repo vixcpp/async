@@ -26,10 +26,7 @@ namespace cnerium::detail
 
 } // namespace cnerium::detail
 
-// ================================
 // Public assertion macro
-// ================================
-
 #if CNERIUM_ENABLE_ASSERTS
 #define CNERIUM_ASSERT(expr) \
   ((expr) ? (void)0 : ::cnerium::detail::assert_fail(#expr, __FILE__, __LINE__))

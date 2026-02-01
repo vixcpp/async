@@ -55,8 +55,6 @@ namespace cnerium::core
     }
 
 #if defined(__unix__) || defined(__APPLE__)
-    // Try to wake sigwait by sending SIGTERM to ourselves if it is registered,
-    // otherwise SIGINT. Best-effort only.
     ::pthread_kill(worker_.native_handle(), SIGTERM);
 #endif
   }
@@ -115,7 +113,6 @@ namespace cnerium::core
           return;
         }
 
-        // If we already have something pending, resume immediately.
         if (!self->pending_.empty())
         {
           sig = self->pending_.front();
@@ -125,7 +122,6 @@ namespace cnerium::core
           return;
         }
 
-        // Otherwise register waiter.
         self->waiter_ = h;
         self->waiter_active_ = true;
       }
@@ -161,7 +157,6 @@ namespace cnerium::core
 
       if (sigs_copy.empty())
       {
-        // Nothing to wait on; avoid busy spinning.
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
         continue;
       }
@@ -171,7 +166,6 @@ namespace cnerium::core
       for (int s : sigs_copy)
         ::sigaddset(&set, s);
 
-      // Block these signals in this thread so sigwait can receive them.
       ::pthread_sigmask(SIG_BLOCK, &set, nullptr);
 
       int received = 0;
@@ -179,7 +173,6 @@ namespace cnerium::core
 
       if (rc != 0)
       {
-        // sigwait failed; small backoff
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
         continue;
       }
@@ -192,7 +185,6 @@ namespace cnerium::core
         pending_.push(received);
       }
 
-      // Deliver on event loop thread
       ctx_post([this]()
                {
       int sig = 0;
@@ -220,16 +212,11 @@ namespace cnerium::core
         }
       }
 
-      // Call user handler first (if any)
       if (handler)
         handler(sig);
 
-      // Resume waiter if present
       if (has_waiter && waiter)
       {
-        // Important: async_wait awaitable stores sig locally only if it was pending.
-        // If we wake a waiter, it will read 'sig' from its awaitable state,
-        // so we need to pass it via a small trick: push it back then resume.
         {
           std::lock_guard<std::mutex> lock(m_);
           pending_.push(sig);
@@ -238,17 +225,12 @@ namespace cnerium::core
       }
       else
       {
-        // No waiter: keep signal in queue (already popped). Re-push for later wait.
         std::lock_guard<std::mutex> lock(m_);
         pending_.push(sig);
       } });
     }
 #endif
   }
-
-  // ---------------------------
-  // io_context lazy subsystem
-  // ---------------------------
 
   signal_set &io_context::signals()
   {

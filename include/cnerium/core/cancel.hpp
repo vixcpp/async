@@ -1,3 +1,16 @@
+/**
+ *
+ *  @file cancel.hpp
+ *  @author Gaspard Kirira
+ *
+ *  Copyright 2025, Gaspard Kirira.  All rights reserved.
+ *  https://github.com/vixcpp/vix
+ *  Use of this source code is governed by a MIT license
+ *  that can be found in the License file.
+ *
+ *  Vix.cpp
+ *
+ */
 #pragma once
 
 #include <atomic>
@@ -7,15 +20,6 @@
 
 namespace cnerium::core
 {
-
-  // Minimal cancellation model inspired by modern runtimes:
-  // - cancel_source owns shared state and can request cancellation
-  // - cancel_token is copyable and can be passed to async ops
-  // - ops should check token.is_cancelled() and/or register callbacks later
-  //
-  // For v0 we keep it simple: just a flag.
-  // Next iteration can add callback registration (on_cancel) and cancellation reasons.
-
   class cancel_state
   {
   public:

@@ -10,8 +10,9 @@ namespace cnerium::net::detail
   {
     guard_ = std::make_unique<guard_t>(asio::make_work_guard(ioc_));
 
-    net_thread_ = std::thread([this]()
-                              { ioc_.run(); });
+    net_thread_ = std::thread(
+        [this]()
+        { ioc_.run(); });
   }
 
   asio_net_service::~asio_net_service()
@@ -35,9 +36,6 @@ namespace cnerium::net::detail
 
 } // namespace cnerium::net::detail
 
-// ---------------------------
-// io_context lazy subsystem
-// ---------------------------
 namespace cnerium::core
 {
   cnerium::net::detail::asio_net_service &io_context::net()

@@ -16,13 +16,8 @@
 
 namespace cnerium::core
 {
-
   class io_context;
 
-  // A minimal CPU thread pool for offloading work that must NOT run on the event loop.
-  // - submit(fn) executes fn on a worker thread
-  // - submit(task-style) returns task<T> that completes on the event loop thread (io_context scheduler)
-  // - supports best-effort cancellation via cancel_token (fn should cooperate)
   class thread_pool
   {
   public:
@@ -31,17 +26,11 @@ namespace cnerium::core
 
     thread_pool(const thread_pool &) = delete;
     thread_pool &operator=(const thread_pool &) = delete;
-
-    // Fire-and-forget job
     void submit(std::function<void()> fn);
-
-    // Coroutine-friendly submit: run fn on worker thread, resume on ctx event loop.
     template <typename Fn>
     auto submit(Fn &&fn, cancel_token ct = {}) -> task<std::invoke_result_t<Fn>>
     {
       using R = std::invoke_result_t<Fn>;
-
-      // Small awaitable that schedules fn on the pool and resumes on ctx scheduler.
       struct awaitable
       {
         thread_pool *pool;
@@ -55,29 +44,29 @@ namespace cnerium::core
 
         void await_suspend(std::coroutine_handle<> h)
         {
-          pool->enqueue([this, h]() mutable
-                        {
-          try
-          {
-            if (ct.is_cancelled())
-              throw std::system_error(cancelled_ec());
+          pool->enqueue(
+              [this, h]() mutable
+              {
+              try
+              {
+                if (ct.is_cancelled())
+                  throw std::system_error(cancelled_ec());
 
-            if constexpr (std::is_void_v<R>)
-            {
-              fn();
-            }
-            else
-            {
-              result.emplace(fn());
-            }
-          }
-          catch (...)
-          {
-            ex = std::current_exception();
-          }
+                if constexpr (std::is_void_v<R>)
+                {
+                  fn();
+                }
+                else
+                {
+                  result.emplace(fn());
+                }
+              }
+              catch (...)
+              {
+                ex = std::current_exception();
+              }
 
-          // Resume on event loop thread
-          pool->ctx_post(h); });
+              pool->ctx_post(h); });
         }
 
         R await_resume()
@@ -100,14 +89,11 @@ namespace cnerium::core
     }
 
     void stop() noexcept;
-
     std::size_t size() const noexcept { return workers_.size(); }
 
   private:
     void worker_loop();
-
     void enqueue(std::function<void()> fn);
-
     void ctx_post(std::coroutine_handle<> h);
 
   private:

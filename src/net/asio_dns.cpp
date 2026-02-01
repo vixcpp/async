@@ -26,11 +26,12 @@ namespace cnerium::net
           &ctx_, ct,
           [&](auto done)
           {
-            res_.async_resolve(host, std::to_string(port),
-                               [done](std::error_code ec, asio::ip::tcp::resolver::results_type r) mutable
-                               {
-                                 done(ec, std::move(r));
-                               });
+            res_.async_resolve(
+                host, std::to_string(port),
+                [done](std::error_code ec, asio::ip::tcp::resolver::results_type r) mutable
+                {
+                  done(ec, std::move(r));
+                });
           }};
 
       std::vector<resolved_address> out;

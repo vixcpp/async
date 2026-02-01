@@ -9,13 +9,6 @@
 
 namespace cnerium::core
 {
-
-  // A minimal single-thread event loop (scheduler) that executes posted jobs.
-  // It is designed to be the "core loop" of Cnerium.
-  // - thread-safe post()
-  // - run() must be called by the event-loop thread
-  // - stop() wakes run()
-  // - supports posting coroutines by scheduling their resumption
   class scheduler
   {
   public:
@@ -24,8 +17,6 @@ namespace cnerium::core
     scheduler(const scheduler &) = delete;
     scheduler &operator=(const scheduler &) = delete;
 
-    // Post a simple callable job.
-    // The callable is executed on the event-loop thread inside run().
     template <typename Fn>
     void post(Fn &&fn)
     {
@@ -36,16 +27,12 @@ namespace cnerium::core
       cv_.notify_one();
     }
 
-    // Schedule the resumption of a coroutine on this scheduler.
-    // The handle is resumed on the event-loop thread.
     void post(std::coroutine_handle<> h)
     {
       post([h]() mutable
            { if (h) h.resume(); });
     }
 
-    // Run the loop until stop() is called and the queue is drained.
-    // Must be called from the thread that owns the event loop.
     void run()
     {
       running_ = true;
@@ -70,7 +57,6 @@ namespace cnerium::core
           }
         }
 
-        // Execute outside the lock.
         if (j.fn)
         {
           j.fn();
@@ -80,7 +66,6 @@ namespace cnerium::core
       running_ = false;
     }
 
-    // Request graceful stop. run() will exit once the queue is empty.
     void stop() noexcept
     {
       {
@@ -92,7 +77,6 @@ namespace cnerium::core
 
     bool is_running() const noexcept { return running_; }
 
-    // Returns how many jobs are pending (approximate; thread-safe).
     std::size_t pending() const
     {
       std::lock_guard<std::mutex> lock(m_);
@@ -107,9 +91,6 @@ namespace cnerium::core
       template <typename Fn>
       explicit job(Fn &&f) : fn(std::forward<Fn>(f)) {}
 
-      // Small type-erased callable (no std::function allocation by default?).
-      // For now we use std::function-like minimal wrapper via std::move-only lambda storage.
-      // In next iteration we can replace this with a small-buffer optimization job type.
       struct fn_base
       {
         virtual ~fn_base() = default;

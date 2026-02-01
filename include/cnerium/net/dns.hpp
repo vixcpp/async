@@ -17,8 +17,6 @@ namespace cnerium::core
 namespace cnerium::net
 {
 
-  // Minimal resolved address record.
-  // We keep it simple for now (host string + port).
   // A backend can return IP strings ("1.2.3.4", "::1", etc.).
   struct resolved_address
   {

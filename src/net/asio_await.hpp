@@ -4,6 +4,7 @@
 #include <exception>
 #include <optional>
 #include <system_error>
+#include <type_traits>
 #include <utility>
 
 #include <cnerium/core/cancel.hpp>
@@ -16,7 +17,6 @@ namespace cnerium::core
 
 namespace cnerium::net::detail
 {
-
   template <typename T>
   struct asio_result
   {
@@ -35,7 +35,8 @@ namespace cnerium::net::detail
     return std::system_error(ec);
   }
 
-  // Awaitable: starts an async operation and resumes on cnerium scheduler.
+  //  - T = void    : (std::error_code)
+  //  - T != void   : (std::error_code, T)
   template <typename Starter, typename T>
   struct asio_awaitable
   {
@@ -59,16 +60,23 @@ namespace cnerium::net::detail
 
       try
       {
-        starter([this, h](std::error_code ec, auto... args) mutable
-                {
-        res.ec = ec;
-        if constexpr (!std::is_same_v<T, void>)
+        if constexpr (std::is_void_v<T>)
         {
-          if (!ec)
-            res.value.emplace(static_cast<T>(args...));
+          starter([this, h](std::error_code ec) mutable
+                  {
+                    res.ec = ec;
+                    ctx->post([h]() mutable { if (h) h.resume(); }); });
         }
+        else
+        {
+          starter([this, h](std::error_code ec, T value) mutable
+                  {
+                    res.ec = ec;
+                    if (!ec)
+                      res.value.emplace(std::move(value));
 
-        ctx->post([h]() mutable { if (h) h.resume(); }); });
+                    ctx->post([h]() mutable { if (h) h.resume(); }); });
+        }
       }
       catch (...)
       {
@@ -89,7 +97,7 @@ namespace cnerium::net::detail
       if (res.ec)
         throw to_system_error(res.ec);
 
-      if constexpr (std::is_same_v<T, void>)
+      if constexpr (std::is_void_v<T>)
       {
         return;
       }

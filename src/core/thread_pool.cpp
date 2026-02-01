@@ -86,8 +86,6 @@ namespace cnerium::core
         }
         catch (...)
         {
-          // v0: swallow exceptions in fire-and-forget jobs to keep workers alive.
-          // submit()->task captures exceptions and rethrows on await_resume().
         }
       }
     }
@@ -97,10 +95,6 @@ namespace cnerium::core
   {
     ctx_.post(h);
   }
-
-  // ---------------------------
-  // io_context lazy subsystem
-  // ---------------------------
 
   thread_pool &io_context::cpu_pool()
   {

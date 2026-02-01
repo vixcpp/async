@@ -19,48 +19,33 @@ namespace cnerium::core
 namespace cnerium::net
 {
 
-  // Basic endpoint representation (string host + port).
-  // Later, a backend can store parsed sockaddr internally.
   struct tcp_endpoint
   {
     std::string host;
     std::uint16_t port{0};
   };
 
-  // TCP stream contract: async connect, read, write, close.
-  // This is the stable API that libraries can target.
   class tcp_stream
   {
   public:
     virtual ~tcp_stream() = default;
-
     virtual core::task<void> async_connect(const tcp_endpoint &ep, core::cancel_token ct = {}) = 0;
-
-    // Read up to buf.size() bytes. Returns number of bytes read.
     virtual core::task<std::size_t> async_read(std::span<std::byte> buf, core::cancel_token ct = {}) = 0;
-
-    // Write all bytes from buf (or as much as backend can). Returns number of bytes written.
     virtual core::task<std::size_t> async_write(std::span<const std::byte> buf, core::cancel_token ct = {}) = 0;
-
     virtual void close() noexcept = 0;
     virtual bool is_open() const noexcept = 0;
   };
 
-  // Listener contract: async accept new connections.
   class tcp_listener
   {
   public:
     virtual ~tcp_listener() = default;
-
     virtual core::task<void> async_listen(const tcp_endpoint &bind_ep, int backlog = 128) = 0;
     virtual core::task<std::unique_ptr<tcp_stream>> async_accept(core::cancel_token ct = {}) = 0;
-
     virtual void close() noexcept = 0;
     virtual bool is_open() const noexcept = 0;
   };
 
-  // Factory functions (backend will provide concrete objects).
-  // For now, we keep them declared; we will implement them when we choose a backend (Asio).
   std::unique_ptr<tcp_stream> make_tcp_stream(core::io_context &ctx);
   std::unique_ptr<tcp_listener> make_tcp_listener(core::io_context &ctx);
 

@@ -1,6 +1,8 @@
 #include <cassert>
 #include <iostream>
 #include <stdexcept>
+#include <string>
+#include <utility>
 
 #include <cnerium/core/task.hpp>
 
@@ -33,54 +35,39 @@ static task<void> chain_void()
 {
   int r = co_await chain();
   assert(r == 43);
-
   co_return;
 }
 
-// Helper: run a task to completion without a scheduler.
-// This works for our current task implementation because awaiting a task transfers execution
-// to the task coroutine and continues via continuations until completion.
 template <typename T>
 static T sync_await(task<T> t)
 {
-  // Wrap in a small coroutine so we can co_await and capture the result.
-  struct runner
-  {
-    task<T> inner;
-    T value{};
-
-    task<void> run()
-    {
-      if constexpr (std::is_void_v<T>)
-      {
-        co_await inner;
-        co_return;
-      }
-      else
-      {
-        value = co_await inner;
-        co_return;
-      }
-    }
-  };
-
-  runner r{std::move(t)};
-
-  // Start the runner coroutine and resume until done.
-  auto h = r.run().handle();
+  auto h = t.handle();
   assert(h);
 
   while (!h.done())
     h.resume();
 
-  if constexpr (std::is_void_v<T>)
-  {
-    return;
-  }
-  else
-  {
-    return std::move(r.value);
-  }
+  auto &p = h.promise();
+
+  if (p.exception)
+    std::rethrow_exception(p.exception);
+
+  assert(p.value.has_value());
+  return std::move(*p.value);
+}
+
+static void sync_await(task<void> t)
+{
+  auto h = t.handle();
+  assert(h);
+
+  while (!h.done())
+    h.resume();
+
+  auto &p = h.promise();
+
+  if (p.exception)
+    std::rethrow_exception(p.exception);
 }
 
 int main()
@@ -106,7 +93,6 @@ int main()
     catch (const std::runtime_error &e)
     {
       caught = true;
-      // Keep message check loose, but ensure it is our exception.
       assert(std::string(e.what()).find("boom") != std::string::npos);
     }
     assert(caught);

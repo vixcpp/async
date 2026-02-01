@@ -35,47 +35,54 @@ namespace cnerium::net
       co_return;
     }
 
-    core::task<std::size_t> async_send_to(std::span<const std::byte> buf, const udp_endpoint &to, core::cancel_token ct) override
+    core::task<std::size_t> async_send_to(
+        std::span<const std::byte> buf,
+        const udp_endpoint &to,
+        core::cancel_token ct) override
     {
       udp::endpoint dst(asio::ip::make_address(to.host), to.port);
 
-      auto n = co_await detail::asio_awaitable<
+      auto sent = co_await detail::asio_awaitable<
           std::function<void(std::function<void(std::error_code, std::size_t)>)>,
           std::size_t>{
           &ctx_, ct,
           [&](auto done)
           {
-            sock_.async_send_to(asio::buffer(buf.data(), buf.size()), dst,
-                                [done](std::error_code ec, std::size_t n) mutable
-                                {
-                                  done(ec, n);
-                                });
+            sock_.async_send_to(
+                asio::buffer(buf.data(), buf.size()), dst,
+                [done](std::error_code ec, std::size_t bytes) mutable
+                {
+                  done(ec, bytes);
+                });
           }};
 
-      co_return n;
+      co_return sent;
     }
 
-    core::task<udp_datagram> async_recv_from(std::span<std::byte> buf, core::cancel_token ct) override
+    core::task<udp_datagram> async_recv_from(
+        std::span<std::byte> buf,
+        core::cancel_token ct) override
     {
       udp::endpoint src;
 
-      auto n = co_await detail::asio_awaitable<
+      auto received = co_await detail::asio_awaitable<
           std::function<void(std::function<void(std::error_code, std::size_t)>)>,
           std::size_t>{
           &ctx_, ct,
           [&](auto done)
           {
-            sock_.async_receive_from(asio::buffer(buf.data(), buf.size()), src,
-                                     [done](std::error_code ec, std::size_t n) mutable
-                                     {
-                                       done(ec, n);
-                                     });
+            sock_.async_receive_from(
+                asio::buffer(buf.data(), buf.size()), src,
+                [done](std::error_code ec, std::size_t bytes) mutable
+                {
+                  done(ec, bytes);
+                });
           }};
 
       udp_datagram d;
       d.from.host = src.address().to_string();
       d.from.port = src.port();
-      d.bytes = n;
+      d.bytes = received;
 
       co_return d;
     }

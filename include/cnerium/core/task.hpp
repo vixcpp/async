@@ -5,6 +5,7 @@
 #include <optional>
 #include <type_traits>
 #include <utility>
+#include <cassert>
 
 namespace cnerium::core
 {
@@ -17,6 +18,7 @@ namespace cnerium::core
     struct promise_common
     {
       std::coroutine_handle<> continuation{};
+      std::exception_ptr exception{};
 
       std::suspend_always initial_suspend() noexcept { return {}; }
 
@@ -36,15 +38,17 @@ namespace cnerium::core
 
       final_awaiter final_suspend() noexcept { return {}; }
 
-      void unhandled_exception() noexcept { exception = std::current_exception(); }
-
-      std::exception_ptr exception{};
+      void unhandled_exception() noexcept
+      {
+        exception = std::current_exception();
+      }
     };
 
     template <typename T>
     struct promise_value : promise_common
     {
-      static_assert(!std::is_reference_v<T>, "task<T> does not support reference T (use task<std::reference_wrapper<T>>).");
+      static_assert(!std::is_reference_v<T>,
+                    "task<T> does not support reference T (use task<std::reference_wrapper<T>>).");
 
       task<T> get_return_object() noexcept;
 
@@ -68,7 +72,7 @@ namespace cnerium::core
     template <typename Promise>
     struct task_awaiter
     {
-      std::coroutine_handle<Promise> h;
+      std::coroutine_handle<Promise> h{};
 
       bool await_ready() const noexcept
       {
@@ -84,6 +88,7 @@ namespace cnerium::core
       decltype(auto) await_resume()
       {
         auto &p = h.promise();
+
         if (p.exception)
           std::rethrow_exception(p.exception);
 
@@ -93,11 +98,14 @@ namespace cnerium::core
         }
         else
         {
-          // We require that the task produced a value if no exception happened.
+          // If no exception happened, we require a value.
+          // Use assert to keep this lightweight for v0.
+          assert(p.value.has_value());
           return std::move(*(p.value));
         }
       }
     };
+
   } // namespace detail
 
   template <typename T>
@@ -135,7 +143,6 @@ namespace cnerium::core
     bool valid() const noexcept { return static_cast<bool>(h_); }
     explicit operator bool() const noexcept { return valid(); }
 
-    // Awaitable interface
     auto operator co_await() & noexcept
     {
       return detail::task_awaiter<promise_type>{h_};
@@ -146,7 +153,6 @@ namespace cnerium::core
       return detail::task_awaiter<promise_type>{h_};
     }
 
-    // Advanced: expose handle for scheduler integration later
     handle_type handle() const noexcept { return h_; }
 
   private:

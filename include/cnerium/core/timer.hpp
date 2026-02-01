@@ -16,15 +16,7 @@
 
 namespace cnerium::core
 {
-
   class io_context;
-
-  // Minimal timer service.
-  // Design choice for v0:
-  // - One dedicated timer thread that waits for the next deadline.
-  // - When a timer expires, it posts the callback/resumption onto the io_context scheduler.
-  // This keeps the event loop non-blocking and the implementation portable.
-  // Later, we can replace with OS timers or Asio integration without breaking API.
 
   class timer
   {
@@ -35,7 +27,6 @@ namespace cnerium::core
 
     explicit timer(io_context &ctx);
     ~timer();
-
     timer(const timer &) = delete;
     timer &operator=(const timer &) = delete;
 
@@ -48,7 +39,6 @@ namespace cnerium::core
 
     // Coroutine-friendly sleep.
     task<void> sleep_for(duration d, cancel_token ct = {});
-
     // Stop timer thread and cancel pending timers.
     void stop() noexcept;
 
@@ -74,18 +64,13 @@ namespace cnerium::core
     }
 
     void schedule(time_point tp, std::unique_ptr<job> j, cancel_token ct);
-
     void timer_loop();
-
     void ctx_post(std::function<void()> fn);
 
   private:
     io_context &ctx_;
-
     mutable std::mutex m_;
     std::condition_variable cv_;
-
-    // We need a stable ordering for same deadlines; use a sequence id.
     std::uint64_t seq_{0};
 
     struct entry
@@ -107,7 +92,6 @@ namespace cnerium::core
     };
 
     std::multiset<entry, cmp> q_;
-
     bool stop_{false};
     std::thread worker_;
   };

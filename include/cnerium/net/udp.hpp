@@ -36,19 +36,14 @@ namespace cnerium::net
   {
   public:
     virtual ~udp_socket() = default;
-
     virtual core::task<void> async_bind(const udp_endpoint &bind_ep) = 0;
-
     virtual core::task<std::size_t> async_send_to(
         std::span<const std::byte> buf,
         const udp_endpoint &to,
         core::cancel_token ct = {}) = 0;
-
-    // Receives into buf and returns metadata (source endpoint + bytes).
     virtual core::task<udp_datagram> async_recv_from(
         std::span<std::byte> buf,
         core::cancel_token ct = {}) = 0;
-
     virtual void close() noexcept = 0;
     virtual bool is_open() const noexcept = 0;
   };

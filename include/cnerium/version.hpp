@@ -8,7 +8,7 @@ namespace cnerium
   inline constexpr int version_minor = 1;
   inline constexpr int version_patch = 0;
 
-  // Optional: pre-release / metadata
+  // pre-release / metadata
   inline constexpr const char *version_prerelease = "";
   inline constexpr const char *version_metadata = "";
 

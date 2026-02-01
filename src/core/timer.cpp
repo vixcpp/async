@@ -3,10 +3,10 @@
 
 #include <functional>
 #include <system_error>
+#include <memory>
 
 namespace cnerium::core
 {
-
   timer::timer(io_context &ctx)
       : ctx_(ctx),
         worker_([this]()
@@ -27,7 +27,6 @@ namespace cnerium::core
       std::lock_guard<std::mutex> lock(m_);
       stop_ = true;
 
-      // Best-effort: clear pending timers
       q_.clear();
     }
     cv_.notify_all();
@@ -96,7 +95,6 @@ namespace cnerium::core
       {
         std::unique_lock<std::mutex> lock(m_);
 
-        // Wait until there is at least one timer or stop is requested.
         cv_.wait(lock, [&]()
                  { return stop_ || !q_.empty(); });
 
@@ -105,10 +103,8 @@ namespace cnerium::core
           break;
         }
 
-        // Get earliest deadline
         auto it = q_.begin();
         next = entry{it->when, it->id, it->ct, nullptr};
-        // Move job out
         next.j = std::move(const_cast<entry &>(*it).j);
         q_.erase(it);
         has_next = true;
@@ -117,7 +113,6 @@ namespace cnerium::core
       if (!has_next)
         continue;
 
-      // Sleep until deadline (with wake-ups if new earlier timers appear)
       while (true)
       {
         auto now = clock::now();
@@ -128,13 +123,11 @@ namespace cnerium::core
         if (stop_)
           return;
 
-        // If a new timer arrives with an earlier deadline, we should switch.
         if (!q_.empty())
         {
           auto it = q_.begin();
           if (it->when < next.when)
           {
-            // Put current back and take the earlier one
             q_.insert(entry{next.when, next.id, next.ct, std::move(next.j)});
 
             next = entry{it->when, it->id, it->ct, nullptr};
@@ -150,27 +143,21 @@ namespace cnerium::core
           return;
       }
 
-      // Deliver on event loop
       if (next.ct.is_cancelled())
       {
-        // canceled: do nothing (v0). Later: notify awaiters with error_code.
         continue;
       }
 
       if (next.j)
       {
-        auto job_ptr = std::move(next.j);
-        ctx_post([j = std::move(job_ptr)]() mutable
+        std::shared_ptr<job> j(next.j.release());
+        ctx_post([j = std::move(j)]() mutable
                  {
-        if (j)
-          j->run(); });
+             if (j)
+               j->run(); });
       }
     }
   }
-
-  // ---------------------------
-  // io_context lazy subsystem
-  // ---------------------------
 
   timer &io_context::timers()
   {

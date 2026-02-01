@@ -7,10 +7,8 @@
 
 namespace cnerium::core
 {
-
   namespace detail
   {
-    // A self-owning coroutine: destroys itself at final suspend.
     struct detached_task
     {
       struct promise_type
@@ -28,7 +26,7 @@ namespace cnerium::core
 
           void await_suspend(std::coroutine_handle<promise_type> h) noexcept
           {
-            h.destroy(); // self-destroy
+            h.destroy();
           }
 
           void await_resume() noexcept {}
@@ -62,8 +60,6 @@ namespace cnerium::core
 
       detached_task(const detached_task &) = delete;
       detached_task &operator=(const detached_task &) = delete;
-
-      // Important: do NOT destroy here. The coroutine destroys itself at final_suspend.
       ~detached_task() = default;
     };
 
@@ -78,9 +74,6 @@ namespace cnerium::core
   {
     auto dt = detail::make_detached(std::move(t));
     ctx.post(dt.h);
-
-    // dt is a small handle wrapper; the coroutine owns itself and will destroy itself.
-    // dt's destructor does nothing, safe to leave scope.
   }
 
 } // namespace cnerium::core

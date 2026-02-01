@@ -7,8 +7,6 @@
 namespace cnerium::core
 {
 
-  // Core error codes for Cnerium.
-  // We use std::error_code to integrate naturally with C++ and other libs.
   enum class errc : std::uint8_t
   {
     ok = 0,
@@ -85,7 +83,6 @@ namespace cnerium::core
 
 } // namespace cnerium::core
 
-// Enable implicit conversion: errc -> std::error_code
 namespace std
 {
   template <>

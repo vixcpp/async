@@ -32,11 +32,12 @@ namespace cnerium::net
           &ctx_, ct,
           [&](auto done)
           {
-            resolver.async_resolve(ep.host, std::to_string(ep.port),
-                                   [done](std::error_code ec, tcp::resolver::results_type r) mutable
-                                   {
-                                     done(ec, std::move(r));
-                                   });
+            resolver.async_resolve(
+                ep.host, std::to_string(ep.port),
+                [done](std::error_code ec, tcp::resolver::results_type r) mutable
+                {
+                  done(ec, std::move(r));
+                });
           }};
 
       co_await detail::asio_awaitable<
@@ -45,11 +46,12 @@ namespace cnerium::net
           &ctx_, ct,
           [&](auto done)
           {
-            asio::async_connect(sock_, results,
-                                [done](std::error_code ec, const tcp::endpoint &) mutable
-                                {
-                                  done(ec);
-                                });
+            asio::async_connect(
+                sock_, results,
+                [done](std::error_code ec, const tcp::endpoint &) mutable
+                {
+                  done(ec);
+                });
           }};
 
       co_return;
@@ -57,38 +59,40 @@ namespace cnerium::net
 
     core::task<std::size_t> async_read(std::span<std::byte> buf, core::cancel_token ct) override
     {
-      auto n = co_await detail::asio_awaitable<
+      auto bytes_read = co_await detail::asio_awaitable<
           std::function<void(std::function<void(std::error_code, std::size_t)>)>,
           std::size_t>{
           &ctx_, ct,
           [&](auto done)
           {
-            sock_.async_read_some(asio::buffer(buf.data(), buf.size()),
-                                  [done](std::error_code ec, std::size_t n) mutable
-                                  {
-                                    done(ec, n);
-                                  });
+            sock_.async_read_some(
+                asio::buffer(buf.data(), buf.size()),
+                [done](std::error_code ec, std::size_t bytes) mutable
+                {
+                  done(ec, bytes);
+                });
           }};
 
-      co_return n;
+      co_return bytes_read;
     }
 
     core::task<std::size_t> async_write(std::span<const std::byte> buf, core::cancel_token ct) override
     {
-      auto n = co_await detail::asio_awaitable<
+      auto bytes_written = co_await detail::asio_awaitable<
           std::function<void(std::function<void(std::error_code, std::size_t)>)>,
           std::size_t>{
           &ctx_, ct,
           [&](auto done)
           {
-            asio::async_write(sock_, asio::buffer(buf.data(), buf.size()),
-                              [done](std::error_code ec, std::size_t n) mutable
-                              {
-                                done(ec, n);
-                              });
+            asio::async_write(
+                sock_, asio::buffer(buf.data(), buf.size()),
+                [done](std::error_code ec, std::size_t bytes) mutable
+                {
+                  done(ec, bytes);
+                });
           }};
 
-      co_return n;
+      co_return bytes_written;
     }
 
     void close() noexcept override
@@ -152,9 +156,10 @@ namespace cnerium::net
           &ctx_, ct,
           [&](auto done)
           {
-            acc_.async_accept(client->native(),
-                              [done](std::error_code ec) mutable
-                              { done(ec); });
+            acc_.async_accept(
+                client->native(),
+                [done](std::error_code ec) mutable
+                { done(ec); });
           }};
 
       co_return std::unique_ptr<tcp_stream>(client.release());
