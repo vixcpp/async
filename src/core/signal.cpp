@@ -245,13 +245,4 @@ namespace cnerium::core
 #endif
   }
 
-  signal_set &io_context::signals()
-  {
-    if (!signals_)
-    {
-      signals_ = std::make_unique<signal_set>(*this);
-    }
-    return *signals_;
-  }
-
 } // namespace cnerium::core

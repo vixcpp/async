@@ -16,71 +16,96 @@
 
 #include <cstddef>
 #include <coroutine>
+#include <deque>
 #include <functional>
 #include <mutex>
 #include <condition_variable>
-#include <deque>
 #include <thread>
-#include <vector>
+#include <type_traits>
 #include <utility>
+#include <vector>
+#include <optional>
+#include <system_error>
 
+#include <cnerium/core/cancel.hpp>
 #include <cnerium/core/error.hpp>
 #include <cnerium/core/task.hpp>
-#include <cnerium/core/cancel.hpp>
 
 namespace cnerium::core
 {
   class io_context;
 
+  namespace detail
+  {
+    template <typename R>
+    struct result_store
+    {
+      std::optional<R> value{};
+      void set(R &&v) { value.emplace(std::move(v)); }
+      R take() { return std::move(*value); }
+    };
+
+    template <>
+    struct result_store<void>
+    {
+      void set() noexcept {}
+    };
+  }
+
   class thread_pool
   {
   public:
-    explicit thread_pool(io_context &ctx, std::size_t threads = std::thread::hardware_concurrency());
+    explicit thread_pool(io_context &ctx,
+                         std::size_t threads = std::thread::hardware_concurrency());
     ~thread_pool();
 
     thread_pool(const thread_pool &) = delete;
     thread_pool &operator=(const thread_pool &) = delete;
+
     void submit(std::function<void()> fn);
+
     template <typename Fn>
     auto submit(Fn &&fn, cancel_token ct = {}) -> task<std::invoke_result_t<Fn>>
     {
       using R = std::invoke_result_t<Fn>;
+
       struct awaitable
       {
-        thread_pool *pool;
-        cancel_token ct;
+        thread_pool *pool{};
+        cancel_token ct{};
         std::decay_t<Fn> fn;
 
-        std::optional<R> result{};
+        detail::result_store<R> store{};
         std::exception_ptr ex{};
 
         bool await_ready() const noexcept { return false; }
 
         void await_suspend(std::coroutine_handle<> h)
         {
-          pool->enqueue(
-              [this, h]() mutable
-              {
-              try
-              {
-                if (ct.is_cancelled())
-                  throw std::system_error(cancelled_ec());
+          pool->enqueue([this, h]() mutable
+                        {
+        try
+        {
+          if (ct.is_cancelled())
+            throw std::system_error(cancelled_ec());
 
-                if constexpr (std::is_void_v<R>)
-                {
-                  fn();
-                }
-                else
-                {
-                  result.emplace(fn());
-                }
-              }
-              catch (...)
-              {
-                ex = std::current_exception();
-              }
+          if constexpr (std::is_void_v<R>)
+          {
+            fn();
+            store.set();
+          }
+          else
+          {
+            R r = fn();
+            store.set(std::move(r));
+          }
+        }
+        catch (...)
+        {
+          ex = std::current_exception();
+        }
 
-              pool->ctx_post(h); });
+        pool->ctx_post(h); });
         }
 
         R await_resume()
@@ -94,12 +119,12 @@ namespace cnerium::core
           }
           else
           {
-            return std::move(*result);
+            return store.take();
           }
         }
       };
 
-      co_return co_await awaitable{this, ct, std::forward<Fn>(fn)};
+      co_return co_await awaitable{this, std::move(ct), std::forward<Fn>(fn)};
     }
 
     void stop() noexcept;

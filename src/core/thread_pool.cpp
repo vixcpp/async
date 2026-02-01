@@ -109,13 +109,4 @@ namespace cnerium::core
     ctx_.post(h);
   }
 
-  thread_pool &io_context::cpu_pool()
-  {
-    if (!cpu_pool_)
-    {
-      cpu_pool_ = std::make_unique<thread_pool>(*this);
-    }
-    return *cpu_pool_;
-  }
-
 } // namespace cnerium::core

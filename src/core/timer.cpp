@@ -172,13 +172,4 @@ namespace cnerium::core
     }
   }
 
-  timer &io_context::timers()
-  {
-    if (!timer_)
-    {
-      timer_ = std::make_unique<timer>(*this);
-    }
-    return *timer_;
-  }
-
 } // namespace cnerium::core

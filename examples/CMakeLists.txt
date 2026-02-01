@@ -1,46 +1,31 @@
 cmake_minimum_required(VERSION 3.20)
 
-# examples/CMakeLists.txt
+include(CneriumWarnings)
+include(CneriumSanitizers)
 
-add_executable(cnerium_example_00_hello_task
+function(cnerium_add_example name)
+  add_executable(${name} ${ARGN})
+  target_link_libraries(${name} PRIVATE cnerium::cnerium)
+  cnerium_apply_warnings(${name})
+  cnerium_apply_sanitizers(${name})
+endfunction()
+
+cnerium_add_example(cnerium_example_00_hello_task
   00_hello_task.cpp
 )
 
-target_link_libraries(cnerium_example_00_hello_task
-  PRIVATE cnerium::cnerium
-)
-
-cnerium_apply_warnings(cnerium_example_00_hello_task)
-cnerium_apply_sanitizers(cnerium_example_00_hello_task)
-
-add_executable(cnerium_example_01_signal_stop
+cnerium_add_example(cnerium_example_01_signal_stop
   01_signal_stop.cpp
 )
-target_link_libraries(cnerium_example_01_signal_stop PRIVATE cnerium::cnerium)
-cnerium_apply_warnings(cnerium_example_01_signal_stop)
-cnerium_apply_sanitizers(cnerium_example_01_signal_stop)
 
-add_executable(cnerium_example_01_timer
+cnerium_add_example(cnerium_example_01_timer
   01_timer.cpp
 )
-target_link_libraries(cnerium_example_01_timer PRIVATE cnerium::cnerium)
-cnerium_apply_warnings(cnerium_example_01_timer)
-cnerium_apply_sanitizers(cnerium_example_01_timer)
 
-add_executable(cnerium_example_02_thread_pool
+cnerium_add_example(cnerium_example_02_thread_pool
   02_thread_pool.cpp
 )
-target_link_libraries(cnerium_example_02_thread_pool PRIVATE cnerium::cnerium)
-cnerium_apply_warnings(cnerium_example_02_thread_pool)
-cnerium_apply_sanitizers(cnerium_example_02_thread_pool)
 
-add_executable(cnerium_example_04_when_all_any
+cnerium_add_example(cnerium_example_04_when_all_any
   when_all_any.cpp
 )
-
-target_link_libraries(cnerium_example_04_when_all_any
-  PRIVATE cnerium::cnerium
-)
-
-cnerium_apply_warnings(cnerium_example_04_when_all_any)
-cnerium_apply_sanitizers(cnerium_example_04_when_all_any)

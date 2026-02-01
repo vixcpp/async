@@ -48,15 +48,3 @@ namespace cnerium::net::detail
   }
 
 } // namespace cnerium::net::detail
-
-namespace cnerium::core
-{
-  cnerium::net::detail::asio_net_service &io_context::net()
-  {
-    if (!net_)
-    {
-      net_ = std::make_unique<cnerium::net::detail::asio_net_service>(*this);
-    }
-    return *net_;
-  }
-} // namespace cnerium::core

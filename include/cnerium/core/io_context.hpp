@@ -27,7 +27,6 @@ namespace cnerium::net::detail
 
 namespace cnerium::core
 {
-
   class thread_pool;
   class timer;
   class signal_set;
@@ -35,15 +34,14 @@ namespace cnerium::core
   class io_context
   {
   public:
-    io_context() = default;
+    io_context();
+    ~io_context();
 
     io_context(const io_context &) = delete;
     io_context &operator=(const io_context &) = delete;
 
     scheduler &get_scheduler() noexcept { return sched_; }
     const scheduler &get_scheduler() const noexcept { return sched_; }
-
-    cnerium::net::detail::asio_net_service &net();
 
     template <typename Fn>
     void post(Fn &&fn)
@@ -71,9 +69,11 @@ namespace cnerium::core
       return sched_.is_running();
     }
 
+    // Lazy services
     thread_pool &cpu_pool();
     timer &timers();
     signal_set &signals();
+    cnerium::net::detail::asio_net_service &net();
 
   private:
     scheduler sched_;

@@ -95,6 +95,7 @@ target_sources(cnerium
     src/net/asio_tcp.cpp
     src/net/asio_udp.cpp
     src/net/asio_dns.cpp
+    src/core/io_context.cpp
   PUBLIC
     FILE_SET HEADERS
     BASE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -124,6 +125,9 @@ set_target_properties(cnerium PROPERTIES
   CXX_EXTENSIONS OFF
   POSITION_INDEPENDENT_CODE ON
 )
+
+option(CNERIUM_BUILD_TESTS "Build Cnerium tests" ON)
+option(CNERIUM_BUILD_EXAMPLES "Build Cnerium examples" ON)
 
 # Tests / Examples
 include(CTest)
