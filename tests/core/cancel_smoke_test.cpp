@@ -1,10 +1,23 @@
+/**
+ *
+ *  @file cancel_smoke_test.cpp
+ *  @author Gaspard Kirira
+ *
+ *  Copyright 2025, Gaspard Kirira.  All rights reserved.
+ *  https://github.com/vixcpp/vix
+ *  Use of this source code is governed by a MIT license
+ *  that can be found in the License file.
+ *
+ *  Vix.cpp
+ *
+ */
 #include <cassert>
 #include <iostream>
 
-#include <cnerium/core/cancel.hpp>
+#include <vix/async/core/cancel.hpp>
 
-using cnerium::core::cancel_source;
-using cnerium::core::cancel_token;
+using vix::async::core::cancel_source;
+using vix::async::core::cancel_token;
 
 static void test_default_token()
 {
@@ -33,6 +46,6 @@ int main()
   test_default_token();
   test_cancel_flow();
 
-  std::cout << "cnerium_cancel_smoke: OK\n";
+  std::cout << "async_cancel_smoke: OK\n";
   return 0;
 }

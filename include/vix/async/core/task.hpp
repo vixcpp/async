@@ -4,15 +4,15 @@
  *  @author Gaspard Kirira
  *
  *  Copyright 2025, Gaspard Kirira.  All rights reserved.
- *  https://github.com/GaspardKirira/cnerium
+ *  https://github.com/vixcpp/vix
  *  Use of this source code is governed by a MIT license
  *  that can be found in the License file.
  *
- *  CNERIUM
+ *  Vix.cpp
  *
  */
-#ifndef CNERIUM_TASK_HPP
-#define CNERIUM_TASK_HPP
+#ifndef VIX_ASYNC_TASK_HPP
+#define VIX_ASYNC_TASK_HPP
 
 #include <coroutine>
 #include <exception>
@@ -21,9 +21,9 @@
 #include <utility>
 #include <cassert>
 
-#include <cnerium/core/scheduler.hpp>
+#include <vix/async/core/scheduler.hpp>
 
-namespace cnerium::core
+namespace vix::async::core
 {
   template <typename T>
   class task;
@@ -35,8 +35,6 @@ namespace cnerium::core
       std::coroutine_handle<> continuation{};
       std::exception_ptr exception{};
 
-      // True if the task was started via start() and released ownership.
-      // In that case, the coroutine must self-destroy at final_suspend.
       bool detached{false};
 
       std::suspend_always initial_suspend() noexcept { return {}; }
@@ -50,13 +48,9 @@ namespace cnerium::core
         {
           auto &p = h.promise();
 
-          // Resume continuation if present.
           if (p.continuation)
             return p.continuation;
 
-          // No continuation:
-          // - if detached, nobody owns the handle anymore -> self destroy
-          // - otherwise, the owning task object will destroy it safely
           if (p.detached)
             h.destroy();
 
@@ -160,18 +154,13 @@ namespace cnerium::core
 
     task(const task &) = delete;
     task &operator=(const task &) = delete;
-
     ~task() { destroy(); }
-
     bool valid() const noexcept { return static_cast<bool>(h_); }
     explicit operator bool() const noexcept { return valid(); }
-
     auto operator co_await() & noexcept { return detail::task_awaiter<promise_type>{h_}; }
     auto operator co_await() && noexcept { return detail::task_awaiter<promise_type>{h_}; }
-
     handle_type handle() const noexcept { return h_; }
 
-    // Start on scheduler and detach ownership (self-destroy at final_suspend).
     void start(scheduler &sched) && noexcept
     {
       if (!h_)
@@ -204,7 +193,6 @@ namespace cnerium::core
 
     task() noexcept = default;
     explicit task(handle_type h) noexcept : h_(h) {}
-
     task(task &&other) noexcept : h_(other.h_) { other.h_ = {}; }
 
     task &operator=(task &&other) noexcept
@@ -220,15 +208,11 @@ namespace cnerium::core
 
     task(const task &) = delete;
     task &operator=(const task &) = delete;
-
     ~task() { destroy(); }
-
     bool valid() const noexcept { return static_cast<bool>(h_); }
     explicit operator bool() const noexcept { return valid(); }
-
     auto operator co_await() & noexcept { return detail::task_awaiter<promise_type>{h_}; }
     auto operator co_await() && noexcept { return detail::task_awaiter<promise_type>{h_}; }
-
     handle_type handle() const noexcept { return h_; }
 
     void start(scheduler &sched) && noexcept
@@ -270,6 +254,6 @@ namespace cnerium::core
     }
   } // namespace detail
 
-} // namespace cnerium::core
+} // namespace vix::async::core
 
 #endif

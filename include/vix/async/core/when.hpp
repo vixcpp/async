@@ -4,15 +4,15 @@
  *  @author Gaspard Kirira
  *
  *  Copyright 2025, Gaspard Kirira.  All rights reserved.
- *  https://github.com/GaspardKirira/cnerium
+ *  https://github.com/vixcpp/vix
  *  Use of this source code is governed by a MIT license
  *  that can be found in the License file.
  *
- *  CNERIUM
+ *  Vix.cpp
  *
  */
-#ifndef CNERIUM_WHEN_HPP
-#define CNERIUM_WHEN_HPP
+#ifndef VIX_ASYNC_WHEN_HPP
+#define VIX_ASYNC_WHEN_HPP
 
 #include <atomic>
 #include <coroutine>
@@ -24,10 +24,10 @@
 #include <utility>
 #include <variant>
 
-#include <cnerium/core/task.hpp>
-#include <cnerium/core/scheduler.hpp>
+#include <vix/async/core/task.hpp>
+#include <vix/async/core/scheduler.hpp>
 
-namespace cnerium::core
+namespace vix::async::core
 {
   namespace detail
   {
@@ -46,7 +46,6 @@ namespace cnerium::core
     template <typename T>
     using stored_t = typename stored<T>::type;
 
-    // Store a result into optional slot
     template <typename T>
     inline void store_into(stored_t<T> &slot, std::decay_t<T> &&v)
     {
@@ -58,7 +57,6 @@ namespace cnerium::core
       slot.emplace(std::monostate{});
     }
 
-    // Materialize optional slot into plain value/monostate (used by when_any)
     template <typename T>
     inline std::decay_t<T> materialize_one(stored_t<T> &slot)
     {
@@ -70,7 +68,6 @@ namespace cnerium::core
       return std::monostate{};
     }
 
-    // Build tuple<conditional<is_void, monostate, Ts>...> from tuple<stored_t<Ts>...>
     template <typename... Ts, std::size_t... Is>
     inline auto materialize_tuple_impl(std::tuple<stored_t<Ts>...> raw, std::index_sequence<Is...>)
     {
@@ -148,8 +145,6 @@ namespace cnerium::core
       {
         if (st->first_ex)
           std::rethrow_exception(st->first_ex);
-
-        // Return normalized tuple directly (no normalize_tuple helper needed)
         return materialize_tuple<Ts...>(std::move(st->results));
       }
 
@@ -293,6 +288,6 @@ namespace cnerium::core
     co_return r;
   }
 
-} // namespace cnerium::core
+} // namespace vix::async::core
 
 #endif

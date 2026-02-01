@@ -4,15 +4,15 @@
  *  @author Gaspard Kirira
  *
  *  Copyright 2025, Gaspard Kirira.  All rights reserved.
- *  https://github.com/GaspardKirira/cnerium
+ *  https://github.com/vixcpp/vix
  *  Use of this source code is governed by a MIT license
  *  that can be found in the License file.
  *
- *  CNERIUM
+ *  Vix.cpp
  *
  */
-#ifndef CNERIUM_ASIO_AWAIT_HPP
-#define CNERIUM_ASIO_AWAIT_HPP
+#ifndef VIX_ASYNC_ASIO_AWAIT_HPP
+#define VIX_ASYNC_ASIO_AWAIT_HPP
 
 #include <coroutine>
 #include <exception>
@@ -21,15 +21,15 @@
 #include <type_traits>
 #include <utility>
 
-#include <cnerium/core/cancel.hpp>
-#include <cnerium/core/error.hpp>
+#include <vix/async/core/cancel.hpp>
+#include <vix/async/core/error.hpp>
 
-namespace cnerium::core
+namespace vix::async::core
 {
   class io_context;
 }
 
-namespace cnerium::net::detail
+namespace vix::async::net::detail
 {
   template <typename T>
   struct asio_result
@@ -54,8 +54,8 @@ namespace cnerium::net::detail
   template <typename Starter, typename T>
   struct asio_awaitable
   {
-    cnerium::core::io_context *ctx{};
-    cnerium::core::cancel_token ct{};
+    vix::async::core::io_context *ctx{};
+    vix::async::core::cancel_token ct{};
     Starter starter;
 
     asio_result<T> res{};
@@ -103,7 +103,7 @@ namespace cnerium::net::detail
     T await_resume()
     {
       if (ct.is_cancelled())
-        throw std::system_error(cnerium::core::cancelled_ec());
+        throw std::system_error(vix::async::core::cancelled_ec());
 
       if (ex)
         std::rethrow_exception(ex);
@@ -122,6 +122,6 @@ namespace cnerium::net::detail
     }
   };
 
-} // namespace cnerium::net::detail
+} // namespace vix::async::net::detail
 
 #endif

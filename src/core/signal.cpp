@@ -1,18 +1,18 @@
 /**
  *
- *  @file signal.hpp
+ *  @file signal.cpp
  *  @author Gaspard Kirira
  *
  *  Copyright 2025, Gaspard Kirira.  All rights reserved.
- *  https://github.com/GaspardKirira/cnerium
+ *  https://github.com/vixcpp/vix
  *  Use of this source code is governed by a MIT license
  *  that can be found in the License file.
  *
- *  CNERIUM
+ *  Vix.cpp
  *
  */
-#include <cnerium/core/signal.hpp>
-#include <cnerium/core/io_context.hpp>
+#include <vix/async/core/signal.hpp>
+#include <vix/async/core/io_context.hpp>
 
 #include <system_error>
 
@@ -21,7 +21,7 @@
 #include <signal.h>
 #endif
 
-namespace cnerium::core
+namespace vix::async::core
 {
 
   signal_set::signal_set(io_context &ctx)
@@ -245,4 +245,4 @@ namespace cnerium::core
 #endif
   }
 
-} // namespace cnerium::core
+} // namespace vix::async::core

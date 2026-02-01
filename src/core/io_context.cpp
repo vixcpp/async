@@ -1,11 +1,23 @@
-#include <cnerium/core/io_context.hpp>
+/**
+ *
+ *  @file io_context.cpp
+ *  @author Gaspard Kirira
+ *
+ *  Copyright 2025, Gaspard Kirira.  All rights reserved.
+ *  https://github.com/vixcpp/vix
+ *  Use of this source code is governed by a MIT license
+ *  that can be found in the License file.
+ *
+ *  Vix.cpp
+ *
+ */
+#include <vix/async/core/io_context.hpp>
+#include <vix/async/core/signal.hpp>
+#include <vix/async/core/thread_pool.hpp>
+#include <vix/async/core/timer.hpp>
+#include <vix/async/net/asio_net_service.hpp>
 
-#include <cnerium/core/signal.hpp>
-#include <cnerium/core/thread_pool.hpp>
-#include <cnerium/core/timer.hpp>
-#include <cnerium/net/asio_net_service.hpp>
-
-namespace cnerium::core
+namespace vix::async::core
 {
   io_context::io_context() = default;
   io_context::~io_context() = default;
@@ -31,11 +43,11 @@ namespace cnerium::core
     return *signals_;
   }
 
-  cnerium::net::detail::asio_net_service &io_context::net()
+  vix::async::net::detail::asio_net_service &io_context::net()
   {
     if (!net_)
-      net_ = std::make_unique<cnerium::net::detail::asio_net_service>(*this);
+      net_ = std::make_unique<vix::async::net::detail::asio_net_service>(*this);
     return *net_;
   }
 
-} // namespace cnerium::core
+} // namespace vix::async::core

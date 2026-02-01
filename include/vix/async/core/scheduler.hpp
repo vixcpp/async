@@ -4,15 +4,15 @@
  *  @author Gaspard Kirira
  *
  *  Copyright 2025, Gaspard Kirira.  All rights reserved.
- *  https://github.com/GaspardKirira/cnerium
+ *  https://github.com/vixcpp/vix
  *  Use of this source code is governed by a MIT license
  *  that can be found in the License file.
  *
- *  CNERIUM
+ *  Vix.cpp
  *
  */
-#ifndef CNERIUM_SCHEDULER_HPP
-#define CNERIUM_SCHEDULER_HPP
+#ifndef VIX_ASYNC_SCHEDULER_HPP
+#define VIX_ASYNC_SCHEDULER_HPP
 
 #include <coroutine>
 #include <cstdint>
@@ -21,7 +21,7 @@
 #include <condition_variable>
 #include <utility>
 
-namespace cnerium::core
+namespace vix::async::core
 {
   class scheduler
   {
@@ -199,6 +199,6 @@ namespace cnerium::core
     bool running_{false};
   };
 
-} // namespace cnerium::core
+} // namespace vix::async::core
 
 #endif

@@ -1,12 +1,25 @@
+/**
+ *
+ *  @file task_smoke_test.cpp
+ *  @author Gaspard Kirira
+ *
+ *  Copyright 2025, Gaspard Kirira.  All rights reserved.
+ *  https://github.com/vixcpp/vix
+ *  Use of this source code is governed by a MIT license
+ *  that can be found in the License file.
+ *
+ *  Vix.cpp
+ *
+ */
 #include <cassert>
 #include <iostream>
 #include <stdexcept>
 #include <string>
 #include <utility>
 
-#include <cnerium/core/task.hpp>
+#include <vix/async/core/task.hpp>
 
-using cnerium::core::task;
+using vix::async::core::task;
 
 static task<int> compute_value()
 {
@@ -98,6 +111,6 @@ int main()
     assert(caught);
   }
 
-  std::cout << "cnerium_task_smoke: OK\n";
+  std::cout << "async_task_smoke: OK\n";
   return 0;
 }

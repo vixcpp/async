@@ -2,14 +2,14 @@
 #include <thread>
 #include <tuple>
 
-#include <cnerium/core/task.hpp>
-#include <cnerium/core/when.hpp>
-#include <cnerium/core/scheduler.hpp>
+#include <vix/async/core/task.hpp>
+#include <vix/async/core/when.hpp>
+#include <vix/async/core/scheduler.hpp>
 
-using cnerium::core::scheduler;
-using cnerium::core::task;
-using cnerium::core::when_all;
-using cnerium::core::when_any;
+using vix::async::core::scheduler;
+using vix::async::core::task;
+using vix::async::core::when_all;
+using vix::async::core::when_any;
 
 task<int> a()
 {

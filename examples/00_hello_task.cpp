@@ -2,21 +2,21 @@
 #include <iostream>
 #include <thread>
 
-#include <cnerium/core/io_context.hpp>
-#include <cnerium/core/task.hpp>
-#include <cnerium/core/timer.hpp>
-#include <cnerium/core/thread_pool.hpp>
+#include <vix/async/core/io_context.hpp>
+#include <vix/async/core/task.hpp>
+#include <vix/async/core/timer.hpp>
+#include <vix/async/core/thread_pool.hpp>
 
-using cnerium::core::io_context;
-using cnerium::core::task;
+using vix::async::core::io_context;
+using vix::async::core::task;
 
 static task<void> app(io_context &ctx)
 {
-  std::cout << "[cnerium] hello from task\n";
+  std::cout << "[async] hello from task\n";
 
   // Timer: sleep for 50ms (does not block the event loop thread)
   co_await ctx.timers().sleep_for(std::chrono::milliseconds(50));
-  std::cout << "[cnerium] after timer\n";
+  std::cout << "[async] after timer\n";
 
   // Thread pool: run CPU work off the event loop, then resume here
   int v = co_await ctx.cpu_pool().submit([]() -> int
@@ -27,7 +27,7 @@ static task<void> app(io_context &ctx)
       sum += (i % 7);
     return sum; });
 
-  std::cout << "[cnerium] cpu_pool result = " << v << "\n";
+  std::cout << "[async] cpu_pool result = " << v << "\n";
   assert(v >= 0);
 
   // Stop the runtime once done
@@ -47,6 +47,6 @@ int main()
   // Run the event loop. It will stop when app() calls ctx.stop().
   ctx.run();
 
-  std::cout << "[cnerium] done\n";
+  std::cout << "[async] done\n";
   return 0;
 }

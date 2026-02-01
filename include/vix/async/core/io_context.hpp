@@ -4,28 +4,28 @@
  *  @author Gaspard Kirira
  *
  *  Copyright 2025, Gaspard Kirira.  All rights reserved.
- *  https://github.com/GaspardKirira/cnerium
+ *  https://github.com/vixcpp/vix
  *  Use of this source code is governed by a MIT license
  *  that can be found in the License file.
  *
- *  CNERIUM
+ *  Vix.cpp
  *
  */
-#ifndef CNERIUM_IO_CONTEXT_HPP
-#define CNERIUM_IO_CONTEXT_HPP
+#ifndef VIX_ASYNC_IO_CONTEXT_HPP
+#define VIX_ASYNC_IO_CONTEXT_HPP
 
 #include <coroutine>
 #include <memory>
 #include <utility>
 
-#include <cnerium/core/scheduler.hpp>
+#include <vix/async/core/scheduler.hpp>
 
-namespace cnerium::net::detail
+namespace vix::async::net::detail
 {
   class asio_net_service;
 }
 
-namespace cnerium::core
+namespace vix::async::core
 {
   class thread_pool;
   class timer;
@@ -73,16 +73,16 @@ namespace cnerium::core
     thread_pool &cpu_pool();
     timer &timers();
     signal_set &signals();
-    cnerium::net::detail::asio_net_service &net();
+    vix::async::net::detail::asio_net_service &net();
 
   private:
     scheduler sched_;
     std::unique_ptr<thread_pool> cpu_pool_;
     std::unique_ptr<timer> timer_;
     std::unique_ptr<signal_set> signals_;
-    std::unique_ptr<cnerium::net::detail::asio_net_service> net_;
+    std::unique_ptr<vix::async::net::detail::asio_net_service> net_;
   };
 
-} // namespace cnerium::core
+} // namespace vix::async::core
 
 #endif

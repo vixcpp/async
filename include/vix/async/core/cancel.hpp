@@ -4,22 +4,22 @@
  *  @author Gaspard Kirira
  *
  *  Copyright 2025, Gaspard Kirira.  All rights reserved.
- *  https://github.com/GaspardKirira/cnerium
+ *  https://github.com/vixcpp/vix
  *  Use of this source code is governed by a MIT license
  *  that can be found in the License file.
  *
- *  CNERIUM
+ *  Vix.cpp
  *
  */
-#ifndef CNERIUM_CANCEL_HPP
-#define CNERIUM_CANCEL_HPP
+#ifndef VIX_ASYNC_CANCEL_HPP
+#define VIX_ASYNC_CANCEL_HPP
 
 #include <atomic>
 #include <memory>
 
-#include <cnerium/core/error.hpp>
+#include <vix/async/core/error.hpp>
 
-namespace cnerium::core
+namespace vix::async::core
 {
   class cancel_state
   {
@@ -87,6 +87,6 @@ namespace cnerium::core
     return make_error_code(errc::canceled);
   }
 
-} // namespace cnerium::core
+} // namespace vix::async::core
 
 #endif

@@ -4,31 +4,31 @@
  *  @author Gaspard Kirira
  *
  *  Copyright 2025, Gaspard Kirira.  All rights reserved.
- *  https://github.com/GaspardKirira/cnerium
+ *  https://github.com/vixcpp/vix
  *  Use of this source code is governed by a MIT license
  *  that can be found in the License file.
  *
- *  CNERIUM
+ *  Vix.cpp
  *
  */
-#ifndef CNERIUM_DNS_HPP
-#define CNERIUM_DNS_HPP
+#ifndef VIX_ASYNC_DNS_HPP
+#define VIX_ASYNC_DNS_HPP
 
 #include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
 
-#include <cnerium/core/task.hpp>
-#include <cnerium/core/cancel.hpp>
-#include <cnerium/core/error.hpp>
+#include <vix/async/core/task.hpp>
+#include <vix/async/core/cancel.hpp>
+#include <vix/async/core/error.hpp>
 
-namespace cnerium::core
+namespace vix::async::core
 {
   class io_context;
 }
 
-namespace cnerium::net
+namespace vix::async::net
 {
 
   // A backend can return IP strings ("1.2.3.4", "::1", etc.).
@@ -52,6 +52,6 @@ namespace cnerium::net
 
   std::unique_ptr<dns_resolver> make_dns_resolver(core::io_context &ctx);
 
-} // namespace cnerium::net
+} // namespace vix::async::net
 
 #endif

@@ -4,15 +4,15 @@
  *  @author Gaspard Kirira
  *
  *  Copyright 2025, Gaspard Kirira.  All rights reserved.
- *  https://github.com/GaspardKirira/cnerium
+ *  https://github.com/vixcpp/vix
  *  Use of this source code is governed by a MIT license
  *  that can be found in the License file.
  *
- *  CNERIUM
+ *  Vix.cpp
  *
  */
-#ifndef CNERIUM_THREAD_POOL_HPP
-#define CNERIUM_THREAD_POOL_HPP
+#ifndef VIX_ASYNC_THREAD_POOL_HPP
+#define VIX_ASYNC_THREAD_POOL_HPP
 
 #include <cstddef>
 #include <coroutine>
@@ -27,11 +27,11 @@
 #include <optional>
 #include <system_error>
 
-#include <cnerium/core/cancel.hpp>
-#include <cnerium/core/error.hpp>
-#include <cnerium/core/task.hpp>
+#include <vix/async/core/cancel.hpp>
+#include <vix/async/core/error.hpp>
+#include <vix/async/core/task.hpp>
 
-namespace cnerium::core
+namespace vix::async::core
 {
   class io_context;
 
@@ -55,8 +55,9 @@ namespace cnerium::core
   class thread_pool
   {
   public:
-    explicit thread_pool(io_context &ctx,
-                         std::size_t threads = std::thread::hardware_concurrency());
+    explicit thread_pool(
+        io_context &ctx,
+        std::size_t threads = std::thread::hardware_concurrency());
     ~thread_pool();
 
     thread_pool(const thread_pool &) = delete;
@@ -146,6 +147,6 @@ namespace cnerium::core
     std::vector<std::thread> workers_;
   };
 
-} // namespace cnerium::core
+} // namespace vix::async::core
 
 #endif

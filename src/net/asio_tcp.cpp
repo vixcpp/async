@@ -4,15 +4,15 @@
  *  @author Gaspard Kirira
  *
  *  Copyright 2025, Gaspard Kirira.  All rights reserved.
- *  https://github.com/GaspardKirira/cnerium
+ *  https://github.com/vixcpp/vix
  *  Use of this source code is governed by a MIT license
  *  that can be found in the License file.
  *
- *  CNERIUM
+ *  Vix.cpp
  *
  */
-#include <cnerium/net/tcp.hpp>
-#include <cnerium/core/io_context.hpp>
+#include <vix/async/net/tcp.hpp>
+#include <vix/async/core/io_context.hpp>
 
 #include "asio_net_service.hpp"
 #include "asio_await.hpp"
@@ -22,20 +22,20 @@
 #include <asio/write.hpp>
 #include <asio/read.hpp>
 
-namespace cnerium::net
+namespace vix::async::net
 {
   using tcp = asio::ip::tcp;
 
   class tcp_stream_asio final : public tcp_stream
   {
   public:
-    explicit tcp_stream_asio(core::io_context &ctx)
+    explicit tcp_stream_asio(vix::async::core::io_context &ctx)
         : ctx_(ctx),
           sock_(ctx_.net().asio_ctx())
     {
     }
 
-    core::task<void> async_connect(const tcp_endpoint &ep, core::cancel_token ct) override
+    vix::async::core::task<void> async_connect(const tcp_endpoint &ep, vix::async::core::cancel_token ct) override
     {
       tcp::resolver resolver(ctx_.net().asio_ctx());
 
@@ -70,7 +70,7 @@ namespace cnerium::net
       co_return;
     }
 
-    core::task<std::size_t> async_read(std::span<std::byte> buf, core::cancel_token ct) override
+    vix::async::core::task<std::size_t> async_read(std::span<std::byte> buf, vix::async::core::cancel_token ct) override
     {
       auto bytes_read = co_await detail::asio_awaitable<
           std::function<void(std::function<void(std::error_code, std::size_t)>)>,
@@ -89,7 +89,7 @@ namespace cnerium::net
       co_return bytes_read;
     }
 
-    core::task<std::size_t> async_write(std::span<const std::byte> buf, core::cancel_token ct) override
+    vix::async::core::task<std::size_t> async_write(std::span<const std::byte> buf, vix::async::core::cancel_token ct) override
     {
       auto bytes_written = co_await detail::asio_awaitable<
           std::function<void(std::function<void(std::error_code, std::size_t)>)>,
@@ -135,7 +135,7 @@ namespace cnerium::net
     {
     }
 
-    core::task<void> async_listen(const tcp_endpoint &bind_ep, int backlog) override
+    vix::async::core::task<void> async_listen(const tcp_endpoint &bind_ep, int backlog) override
     {
       tcp::endpoint ep(asio::ip::make_address(bind_ep.host), bind_ep.port);
 
@@ -159,7 +159,7 @@ namespace cnerium::net
       co_return;
     }
 
-    core::task<std::unique_ptr<tcp_stream>> async_accept(core::cancel_token ct) override
+    vix::async::core::task<std::unique_ptr<tcp_stream>> async_accept(vix::async::core::cancel_token ct) override
     {
       auto client = std::make_unique<tcp_stream_asio>(ctx_);
 
@@ -190,18 +190,18 @@ namespace cnerium::net
     }
 
   private:
-    core::io_context &ctx_;
+    vix::async::core::io_context &ctx_;
     tcp::acceptor acc_;
   };
 
-  std::unique_ptr<tcp_stream> make_tcp_stream(core::io_context &ctx)
+  std::unique_ptr<tcp_stream> make_tcp_stream(vix::async::core::io_context &ctx)
   {
     return std::make_unique<tcp_stream_asio>(ctx);
   }
 
-  std::unique_ptr<tcp_listener> make_tcp_listener(core::io_context &ctx)
+  std::unique_ptr<tcp_listener> make_tcp_listener(vix::async::core::io_context &ctx)
   {
     return std::make_unique<tcp_listener_asio>(ctx);
   }
 
-} // namespace cnerium::net
+} // namespace vix::async::net

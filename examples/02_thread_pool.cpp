@@ -2,12 +2,12 @@
 #include <iostream>
 #include <vector>
 
-#include <cnerium/core/io_context.hpp>
-#include <cnerium/core/task.hpp>
-#include <cnerium/core/thread_pool.hpp>
+#include <vix/async/core/io_context.hpp>
+#include <vix/async/core/task.hpp>
+#include <vix/async/core/thread_pool.hpp>
 
-using cnerium::core::io_context;
-using cnerium::core::task;
+using vix::async::core::io_context;
+using vix::async::core::task;
 
 static int heavy_work(int n)
 {
@@ -20,7 +20,7 @@ static int heavy_work(int n)
 
 static task<void> app(io_context &ctx)
 {
-  std::cout << "[cnerium] thread_pool demo start\n";
+  std::cout << "[async] thread_pool demo start\n";
 
   // Submit several CPU jobs in sequence (simple demo).
   // Later we can add when_all / gather for parallel awaits.
@@ -31,7 +31,7 @@ static task<void> app(io_context &ctx)
   int c = co_await ctx.cpu_pool().submit([]
                                          { return heavy_work(3); });
 
-  std::cout << "[cnerium] results: " << a << ", " << b << ", " << c << "\n";
+  std::cout << "[async] results: " << a << ", " << b << ", " << c << "\n";
   assert(a != 0 || b != 0 || c != 0);
 
   // Fire-and-forget job
@@ -42,7 +42,7 @@ static task<void> app(io_context &ctx)
     for (int i = 0; i < 100000; ++i)
       x += i; });
 
-  std::cout << "[cnerium] demo done\n";
+  std::cout << "[async] demo done\n";
   ctx.stop();
   co_return;
 }

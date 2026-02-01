@@ -1,12 +1,25 @@
+/**
+ *
+ *  @file scheduler_smoke_test.cpp
+ *  @author Gaspard Kirira
+ *
+ *  Copyright 2025, Gaspard Kirira.  All rights reserved.
+ *  https://github.com/vixcpp/vix
+ *  Use of this source code is governed by a MIT license
+ *  that can be found in the License file.
+ *
+ *  Vix.cpp
+ *
+ */
 #include <cassert>
 #include <atomic>
 #include <iostream>
 #include <thread>
 #include <chrono>
 
-#include <cnerium/core/scheduler.hpp>
+#include <vix/async/core/scheduler.hpp>
 
-using cnerium::core::scheduler;
+using vix::async::core::scheduler;
 
 int main()
 {
@@ -43,6 +56,6 @@ int main()
   // It can never be less if run() started correctly and we waited a bit.
   assert(counter.load() >= 12);
 
-  std::cout << "cnerium_scheduler_smoke: OK\n";
+  std::cout << "async_scheduler_smoke: OK\n";
   return 0;
 }

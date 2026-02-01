@@ -1,3 +1,16 @@
+/**
+ *
+ *  @file when_smoke_test.cpp
+ *  @author Gaspard Kirira
+ *
+ *  Copyright 2025, Gaspard Kirira.  All rights reserved.
+ *  https://github.com/vixcpp/vix
+ *  Use of this source code is governed by a MIT license
+ *  that can be found in the License file.
+ *
+ *  Vix.cpp
+ *
+ */
 #include <cassert>
 #include <chrono>
 #include <iostream>
@@ -7,19 +20,16 @@
 #include <type_traits>
 #include <utility>
 
-#include <cnerium/core/scheduler.hpp>
-#include <cnerium/core/task.hpp>
-#include <cnerium/core/when.hpp>
+#include <vix/async/core/scheduler.hpp>
+#include <vix/async/core/task.hpp>
+#include <vix/async/core/when.hpp>
 
-using cnerium::core::scheduler;
-using cnerium::core::task;
-using cnerium::core::when_all;
-using cnerium::core::when_any;
+using vix::async::core::scheduler;
+using vix::async::core::task;
+using vix::async::core::when_all;
+using vix::async::core::when_any;
 
-// ------------------------------------------------------------
 // Helpers: drive a scheduler loop while awaiting a task
-// ------------------------------------------------------------
-
 struct scheduler_runner
 {
   scheduler &sched;
@@ -89,11 +99,8 @@ static void sync_await(task<void> t)
     h.resume();
 }
 
-// ------------------------------------------------------------
 // when_any compatibility helpers:
 // support tuple<optional<T>...> and tuple<T...>
-// ------------------------------------------------------------
-
 template <typename X>
 static bool is_ready(const X &x)
 {
@@ -112,10 +119,7 @@ static decltype(auto) get_value(X &&x)
     return std::forward<X>(x); // T direct
 }
 
-// ------------------------------------------------------------
 // Test coroutines
-// ------------------------------------------------------------
-
 static task<int> immediate(int v)
 {
   co_return v;
@@ -232,6 +236,6 @@ int main()
   sync_await(test_when_any_picks_first(sched));
   sync_await(test_when_any_handles_immediate(sched));
 
-  std::cout << "cnerium_when_smoke: OK\n";
+  std::cout << "async_when_smoke: OK\n";
   return 0;
 }

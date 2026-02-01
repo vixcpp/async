@@ -4,35 +4,35 @@
  *  @author Gaspard Kirira
  *
  *  Copyright 2025, Gaspard Kirira.  All rights reserved.
- *  https://github.com/GaspardKirira/cnerium
+ *  https://github.com/vixcpp/vix
  *  Use of this source code is governed by a MIT license
  *  that can be found in the License file.
  *
- *  CNERIUM
+ *  Vix.cpp
  *
  */
-#include <cnerium/net/udp.hpp>
-#include <cnerium/core/io_context.hpp>
+#include <vix/async/net/udp.hpp>
+#include <vix/async/core/io_context.hpp>
 
 #include "asio_net_service.hpp"
 #include "asio_await.hpp"
 
 #include <asio/ip/udp.hpp>
 
-namespace cnerium::net
+namespace vix::async::net
 {
   using udp = asio::ip::udp;
 
   class udp_socket_asio final : public udp_socket
   {
   public:
-    explicit udp_socket_asio(core::io_context &ctx)
+    explicit udp_socket_asio(vix::async::core::io_context &ctx)
         : ctx_(ctx),
           sock_(ctx_.net().asio_ctx())
     {
     }
 
-    core::task<void> async_bind(const udp_endpoint &bind_ep) override
+    vix::async::core::task<void> async_bind(const udp_endpoint &bind_ep) override
     {
       udp::endpoint ep(asio::ip::make_address(bind_ep.host), bind_ep.port);
 
@@ -48,7 +48,7 @@ namespace cnerium::net
       co_return;
     }
 
-    core::task<std::size_t> async_send_to(
+    vix::async::core::task<std::size_t> async_send_to(
         std::span<const std::byte> buf,
         const udp_endpoint &to,
         core::cancel_token ct) override
@@ -72,9 +72,9 @@ namespace cnerium::net
       co_return sent;
     }
 
-    core::task<udp_datagram> async_recv_from(
+    vix::async::core::task<udp_datagram> async_recv_from(
         std::span<std::byte> buf,
-        core::cancel_token ct) override
+        vix::async::core::cancel_token ct) override
     {
       udp::endpoint src;
 
@@ -112,13 +112,13 @@ namespace cnerium::net
     }
 
   private:
-    core::io_context &ctx_;
+    vix::async::core::io_context &ctx_;
     udp::socket sock_;
   };
 
-  std::unique_ptr<udp_socket> make_udp_socket(core::io_context &ctx)
+  std::unique_ptr<udp_socket> make_udp_socket(vix::async::core::io_context &ctx)
   {
     return std::make_unique<udp_socket_asio>(ctx);
   }
 
-} // namespace cnerium::net
+} // namespace vix::async::net

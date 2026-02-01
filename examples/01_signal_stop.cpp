@@ -1,11 +1,11 @@
 #include <iostream>
 
-#include <cnerium/core/io_context.hpp>
-#include <cnerium/core/signal.hpp>
-#include <cnerium/core/task.hpp>
+#include <vix/async/core/io_context.hpp>
+#include <vix/async/core/signal.hpp>
+#include <vix/async/core/task.hpp>
 
-using cnerium::core::io_context;
-using cnerium::core::task;
+using vix::async::core::io_context;
+using vix::async::core::task;
 
 static task<void> app(io_context &ctx)
 {
@@ -15,18 +15,15 @@ static task<void> app(io_context &ctx)
   sig.add(SIGINT);
   sig.add(SIGTERM);
 
-  std::cout << "[cnerium] waiting for SIGINT/SIGTERM (Ctrl+C)\n";
+  std::cout << "[async] waiting for SIGINT/SIGTERM (Ctrl+C)\n";
 
-  // Option A: handler called on event loop
   sig.on_signal([&](int s)
                 {
-    std::cout << "[cnerium] signal received: " << s << " -> stopping\n";
+    std::cout << "[async] signal received: " << s << " -> stopping\n";
     ctx.stop(); });
 
-  // Option B: also show coroutine wait (optional, but useful)
-  // If you prefer coroutine style only, remove on_signal and just do async_wait().
   int s = co_await sig.async_wait();
-  std::cout << "[cnerium] async_wait got signal: " << s << " -> stopping\n";
+  std::cout << "[async] async_wait got signal: " << s << " -> stopping\n";
   ctx.stop();
 
   co_return;
@@ -41,6 +38,6 @@ int main()
 
   ctx.run();
 
-  std::cout << "[cnerium] stopped\n";
+  std::cout << "[async] stopped\n";
   return 0;
 }

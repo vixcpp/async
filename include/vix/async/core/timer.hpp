@@ -4,15 +4,15 @@
  *  @author Gaspard Kirira
  *
  *  Copyright 2025, Gaspard Kirira.  All rights reserved.
- *  https://github.com/GaspardKirira/cnerium
+ *  https://github.com/vixcpp/vix
  *  Use of this source code is governed by a MIT license
  *  that can be found in the License file.
  *
- *  CNERIUM
+ *  Vix.cpp
  *
  */
-#ifndef CNERIUM_TIMER_HPP
-#define CNERIUM_TIMER_HPP
+#ifndef VIX_ASYNC_TIMER_HPP
+#define VIX_ASYNC_TIMER_HPP
 
 #include <chrono>
 #include <coroutine>
@@ -24,11 +24,11 @@
 #include <utility>
 #include <set>
 
-#include <cnerium/core/task.hpp>
-#include <cnerium/core/cancel.hpp>
-#include <cnerium/core/error.hpp>
+#include <vix/async/core/task.hpp>
+#include <vix/async/core/cancel.hpp>
+#include <vix/async/core/error.hpp>
 
-namespace cnerium::core
+namespace vix::async::core
 {
   class io_context;
 
@@ -44,16 +44,13 @@ namespace cnerium::core
     timer(const timer &) = delete;
     timer &operator=(const timer &) = delete;
 
-    // Fire-and-forget: call fn on the event loop after delay.
     template <typename Fn>
     void after(duration d, Fn &&fn, cancel_token ct = {})
     {
       schedule(clock::now() + d, make_job(std::forward<Fn>(fn)), std::move(ct));
     }
 
-    // Coroutine-friendly sleep.
     task<void> sleep_for(duration d, cancel_token ct = {});
-    // Stop timer thread and cancel pending timers.
     void stop() noexcept;
 
   private:
@@ -110,6 +107,6 @@ namespace cnerium::core
     std::thread worker_;
   };
 
-} // namespace cnerium::core
+} // namespace vix::async::core
 
 #endif

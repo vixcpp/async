@@ -1,24 +1,24 @@
 /**
  *
- *  @file timer.hpp
+ *  @file timer.cpp
  *  @author Gaspard Kirira
  *
  *  Copyright 2025, Gaspard Kirira.  All rights reserved.
- *  https://github.com/GaspardKirira/cnerium
+ *  https://github.com/vixcpp/vix
  *  Use of this source code is governed by a MIT license
  *  that can be found in the License file.
  *
- *  CNERIUM
+ *  Vix.cpp
  *
  */
-#include <cnerium/core/timer.hpp>
-#include <cnerium/core/io_context.hpp>
+#include <vix/async/core/timer.hpp>
+#include <vix/async/core/io_context.hpp>
 
 #include <functional>
 #include <system_error>
 #include <memory>
 
-namespace cnerium::core
+namespace vix::async::core
 {
   timer::timer(io_context &ctx)
       : ctx_(ctx),
@@ -172,4 +172,4 @@ namespace cnerium::core
     }
   }
 
-} // namespace cnerium::core
+} // namespace vix::async::core

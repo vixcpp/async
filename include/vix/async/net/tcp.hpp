@@ -4,15 +4,15 @@
  *  @author Gaspard Kirira
  *
  *  Copyright 2025, Gaspard Kirira.  All rights reserved.
- *  https://github.com/GaspardKirira/cnerium
+ *  https://github.com/vixcpp/vix
  *  Use of this source code is governed by a MIT license
  *  that can be found in the License file.
  *
- *  CNERIUM
+ *  Vix.cpp
  *
  */
-#ifndef CNERIUM_TCP_HPP
-#define CNERIUM_TCP_HPP
+#ifndef VIX_ASYNC_TCP_HPP
+#define VIX_ASYNC_TCP_HPP
 
 #include <cstddef>
 #include <cstdint>
@@ -21,16 +21,16 @@
 #include <string>
 #include <system_error>
 
-#include <cnerium/core/task.hpp>
-#include <cnerium/core/cancel.hpp>
-#include <cnerium/core/error.hpp>
+#include <vix/async/core/task.hpp>
+#include <vix/async/core/cancel.hpp>
+#include <vix/async/core/error.hpp>
 
-namespace cnerium::core
+namespace vix::async::core
 {
   class io_context;
 }
 
-namespace cnerium::net
+namespace vix::async::net
 {
 
   struct tcp_endpoint
@@ -63,6 +63,6 @@ namespace cnerium::net
   std::unique_ptr<tcp_stream> make_tcp_stream(core::io_context &ctx);
   std::unique_ptr<tcp_listener> make_tcp_listener(core::io_context &ctx);
 
-} // namespace cnerium::net
+} // namespace vix::async::net
 
 #endif

@@ -4,20 +4,20 @@
  *  @author Gaspard Kirira
  *
  *  Copyright 2025, Gaspard Kirira.  All rights reserved.
- *  https://github.com/GaspardKirira/cnerium
+ *  https://github.com/vixcpp/vix
  *  Use of this source code is governed by a MIT license
  *  that can be found in the License file.
  *
- *  CNERIUM
+ *  Vix.cpp
  *
  */
-#ifndef CNERIUM_TRAITS_HPP
-#define CNERIUM_TRAITS_HPP
+#ifndef ASYNC_TRAITS_HPP
+#define ASYNC_TRAITS_HPP
 
 #include <type_traits>
 #include <utility>
 
-namespace cnerium::detail
+namespace vix::async::detail
 {
   template <typename T>
   using remove_cvref_t = std::remove_cv_t<std::remove_reference_t<T>>;
@@ -34,6 +34,6 @@ namespace cnerium::detail
   template <typename F, typename... Args>
   inline constexpr bool is_invocable_v = is_invocable<F, Args...>::value;
 
-} // namespace cnerium::detail
+} // namespace vix::async::detail
 
 #endif

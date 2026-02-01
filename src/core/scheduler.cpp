@@ -1,18 +1,18 @@
 /**
  *
- *  @file scheduler.hpp
+ *  @file scheduler.cpp
  *  @author Gaspard Kirira
  *
  *  Copyright 2025, Gaspard Kirira.  All rights reserved.
- *  https://github.com/GaspardKirira/cnerium
+ *  https://github.com/vixcpp/vix
  *  Use of this source code is governed by a MIT license
  *  that can be found in the License file.
  *
- *  CNERIUM
+ *  Vix.cpp
  *
  */
-#include <cnerium/core/scheduler.hpp>
+#include <vix/async/core/scheduler.hpp>
 
-namespace cnerium::core
+namespace vix::async::core
 {
-} // namespace cnerium::core
+} // namespace vix::async::core

@@ -4,28 +4,27 @@
  *  @author Gaspard Kirira
  *
  *  Copyright 2025, Gaspard Kirira.  All rights reserved.
- *  https://github.com/GaspardKirira/cnerium
+ *  https://github.com/vixcpp/vix
  *  Use of this source code is governed by a MIT license
  *  that can be found in the License file.
  *
- *  CNERIUM
+ *  Vix.cpp
  *
  */
-#include <cnerium/net/dns.hpp>
-#include <cnerium/core/io_context.hpp>
+#include <vix/async/net/dns.hpp>
+#include <vix/async/core/io_context.hpp>
 
 #include "asio_net_service.hpp"
 #include "asio_await.hpp"
 
 #include <asio/ip/tcp.hpp>
 
-namespace cnerium::net
+namespace vix::async::net
 {
-
   class dns_resolver_asio final : public dns_resolver
   {
   public:
-    explicit dns_resolver_asio(core::io_context &ctx)
+    explicit dns_resolver_asio(vix::async::core::io_context &ctx)
         : ctx_(ctx),
           res_(ctx_.net().asio_ctx())
     {
@@ -69,4 +68,4 @@ namespace cnerium::net
     return std::make_unique<dns_resolver_asio>(ctx);
   }
 
-} // namespace cnerium::net
+} // namespace vix::async::net

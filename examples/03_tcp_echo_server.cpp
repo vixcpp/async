@@ -1,19 +1,19 @@
 #include <iostream>
 #include <vector>
 
-#include <cnerium/core/io_context.hpp>
-#include <cnerium/core/task.hpp>
-#include <cnerium/core/signal.hpp>
-#include <cnerium/core/spawn.hpp>
+#include <vix/async/core/io_context.hpp>
+#include <vix/async/core/task.hpp>
+#include <vix/async/core/signal.hpp>
+#include <vix/async/core/spawn.hpp>
 
-#include <cnerium/net/tcp.hpp>
+#include <vix/async/net/tcp.hpp>
 
-using cnerium::core::io_context;
-using cnerium::core::task;
+using vix::async::core::io_context;
+using vix::async::core::task;
 
-static task<void> handle_client(std::unique_ptr<cnerium::net::tcp_stream> client)
+static task<void> handle_client(std::unique_ptr<vix::async::net::tcp_stream> client)
 {
-  std::cout << "[cnerium] client connected\n";
+  std::cout << "[async] client connected\n";
 
   std::vector<std::byte> buf(4096);
 
@@ -28,7 +28,7 @@ static task<void> handle_client(std::unique_ptr<cnerium::net::tcp_stream> client
     }
     catch (const std::system_error &e)
     {
-      std::cout << "[cnerium] read error: " << e.code().message() << "\n";
+      std::cout << "[async] read error: " << e.code().message() << "\n";
       break;
     }
 
@@ -42,13 +42,13 @@ static task<void> handle_client(std::unique_ptr<cnerium::net::tcp_stream> client
     }
     catch (const std::system_error &e)
     {
-      std::cout << "[cnerium] write error: " << e.code().message() << "\n";
+      std::cout << "[async] write error: " << e.code().message() << "\n";
       break;
     }
   }
 
   client->close();
-  std::cout << "[cnerium] client disconnected\n";
+  std::cout << "[async] client disconnected\n";
   co_return;
 }
 
@@ -59,28 +59,26 @@ static task<void> server(io_context &ctx)
   sig.add(SIGTERM);
   sig.on_signal([&](int s)
                 {
-    std::cout << "[cnerium] signal " << s << " received -> stopping\n";
+    std::cout << "[async] signal " << s << " received -> stopping\n";
     ctx.stop(); });
 
-  auto listener = cnerium::net::make_tcp_listener(ctx);
+  auto listener = vix::async::net::make_tcp_listener(ctx);
 
   co_await listener->async_listen({"0.0.0.0", 9090}, 128);
-  std::cout << "[cnerium] echo server listening on 0.0.0.0:9090\n";
+  std::cout << "[async] echo server listening on 0.0.0.0:9090\n";
 
   while (ctx.is_running())
   {
     try
     {
       auto client = co_await listener->async_accept();
-
-      // 🔥 SPAWN CONCURRENT CLIENT HANDLER
-      cnerium::core::spawn_detached(
+      vix::async::core::spawn_detached(
           ctx,
           handle_client(std::move(client)));
     }
     catch (const std::system_error &e)
     {
-      std::cout << "[cnerium] accept error: " << e.code().message() << "\n";
+      std::cout << "[async] accept error: " << e.code().message() << "\n";
       break;
     }
   }
@@ -98,6 +96,6 @@ int main()
   ctx.post(t.handle());
 
   ctx.run();
-  std::cout << "[cnerium] server stopped\n";
+  std::cout << "[async] server stopped\n";
   return 0;
 }

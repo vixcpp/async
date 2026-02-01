@@ -4,15 +4,15 @@
  *  @author Gaspard Kirira
  *
  *  Copyright 2025, Gaspard Kirira.  All rights reserved.
- *  https://github.com/GaspardKirira/cnerium
+ *  https://github.com/vixcpp/vix
  *  Use of this source code is governed by a MIT license
  *  that can be found in the License file.
  *
- *  CNERIUM
+ *  Vix.cpp
  *
  */
-#ifndef CNERIUM_LOG_HPP
-#define CNERIUM_LOG_HPP
+#ifndef VIX_ASYNC_LOG_HPP
+#define VIX_ASYNC_LOG_HPP
 
 #include <atomic>
 #include <chrono>
@@ -21,12 +21,9 @@
 #include <mutex>
 #include <string_view>
 
-namespace cnerium::detail
+namespace vix::async::detail
 {
-
-  // ================================
   // Log levels
-  // ================================
   enum class log_level : int
   {
     trace = 0,
@@ -38,15 +35,11 @@ namespace cnerium::detail
     off
   };
 
-  // ================================
   // Global log state
-  // ================================
   inline std::atomic<log_level> g_log_level{log_level::info};
   inline std::mutex g_log_mutex;
 
-  // ================================
   // Helpers
-  // ================================
   inline const char *to_string(log_level lvl)
   {
     switch (lvl)
@@ -110,16 +103,13 @@ namespace cnerium::detail
       std::abort();
   }
 
-// ================================
-// Convenience macros
-// ================================
-#define CNERIUM_LOG_TRACE(msg) ::cnerium::detail::log(::cnerium::detail::log_level::trace, msg)
-#define CNERIUM_LOG_DEBUG(msg) ::cnerium::detail::log(::cnerium::detail::log_level::debug, msg)
-#define CNERIUM_LOG_INFO(msg) ::cnerium::detail::log(::cnerium::detail::log_level::info, msg)
-#define CNERIUM_LOG_WARN(msg) ::cnerium::detail::log(::cnerium::detail::log_level::warn, msg)
-#define CNERIUM_LOG_ERROR(msg) ::cnerium::detail::log(::cnerium::detail::log_level::error, msg)
-#define CNERIUM_LOG_FATAL(msg) ::cnerium::detail::log(::cnerium::detail::log_level::fatal, msg)
+#define ASYNC_LOG_TRACE(msg) ::vix::async::detail::log(::vix::async::detail::log_level::trace, msg)
+#define ASYNC_LOG_DEBUG(msg) ::vix::async::detail::log(::vix::async::detail::log_level::debug, msg)
+#define ASYNC_LOG_INFO(msg) ::vix::async::detail::log(::vix::async::detail::log_level::info, msg)
+#define ASYNC_LOG_WARN(msg) ::vix::async::detail::log(::vix::async::detail::log_level::warn, msg)
+#define ASYNC_LOG_ERROR(msg) ::vix::async::detail::log(::vix::async::detail::log_level::error, msg)
+#define ASYNC_LOG_FATAL(msg) ::vix::async::detail::log(::vix::async::detail::log_level::fatal, msg)
 
-} // namespace cnerium::detail
+} // namespace vix::async::detail
 
 #endif

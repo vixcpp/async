@@ -1,4 +1,0 @@
-# cmake/cneriumConfig.cmake.in
-@PACKAGE_INIT@
-
-include("${CMAKE_CURRENT_LIST_DIR}/cneriumTargets.cmake")

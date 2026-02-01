@@ -4,21 +4,21 @@
  *  @author Gaspard Kirira
  *
  *  Copyright 2025, Gaspard Kirira.  All rights reserved.
- *  https://github.com/GaspardKirira/cnerium
+ *  https://github.com/vixcpp/vix
  *  Use of this source code is governed by a MIT license
  *  that can be found in the License file.
  *
- *  CNERIUM
+ *  Vix.cpp
  *
  */
 #include "asio_net_service.hpp"
 
-#include <cnerium/core/io_context.hpp>
+#include <vix/async/core/io_context.hpp>
 
-namespace cnerium::net::detail
+namespace vix::async::net::detail
 {
 
-  asio_net_service::asio_net_service(cnerium::core::io_context &ctx)
+  asio_net_service::asio_net_service(vix::async::core::io_context &ctx)
       : ctx_(ctx)
   {
     guard_ = std::make_unique<guard_t>(asio::make_work_guard(ioc_));
@@ -47,4 +47,4 @@ namespace cnerium::net::detail
     ioc_.stop();
   }
 
-} // namespace cnerium::net::detail
+} // namespace vix::async::net::detail
