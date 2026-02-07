@@ -46,8 +46,7 @@ static task<void> throws_task()
 
 static task<void> chain_void()
 {
-  int r = co_await chain();
-  assert(r == 43);
+  assert((co_await chain()) == 43);
   co_return;
 }
 
@@ -87,8 +86,7 @@ int main()
 {
   // Basic chain
   {
-    int v = sync_await(chain());
-    assert(v == 43);
+    assert(sync_await(chain()) == 43);
   }
 
   // Void chain
@@ -99,6 +97,7 @@ int main()
   // Exception propagation
   {
     bool caught = false;
+
     try
     {
       sync_await(throws_task());
@@ -108,7 +107,9 @@ int main()
       caught = true;
       assert(std::string(e.what()).find("boom") != std::string::npos);
     }
-    assert(caught);
+
+    if (!caught)
+      return 2;
   }
 
   std::cout << "async_task_smoke: OK\n";

@@ -33,6 +33,33 @@ namespace vix::async::core
 {
   namespace detail
   {
+    template <class Aw>
+    struct forward_await
+    {
+      std::decay_t<Aw> aw;
+
+      bool await_ready() noexcept(noexcept(aw.await_ready()))
+      {
+        return aw.await_ready();
+      }
+
+      auto await_suspend(std::coroutine_handle<> h) noexcept(noexcept(aw.await_suspend(h)))
+      {
+        return aw.await_suspend(h);
+      }
+
+      decltype(auto) await_resume() noexcept(noexcept(aw.await_resume()))
+      {
+        return aw.await_resume();
+      }
+    };
+
+    template <class Aw>
+    forward_await<Aw> as_awaitable(Aw &&aw)
+    {
+      return forward_await<Aw>{std::forward<Aw>(aw)};
+    }
+
     /**
      * @brief Storage mapping for when_all/when_any results.
      *
@@ -453,7 +480,7 @@ namespace vix::async::core
         &sched,
         std::tuple<task<Ts>...>{std::move(ts)...}};
 
-    auto out = co_await aw;
+    auto out = co_await detail::as_awaitable(std::move(aw));
     co_return out;
   }
 
@@ -483,7 +510,7 @@ namespace vix::async::core
         &sched,
         std::tuple<task<Ts>...>{std::move(ts)...}};
 
-    auto [idx, raw] = co_await aw;
+    auto [idx, raw] = co_await detail::as_awaitable(std::move(aw));
 
     using OutTuple = std::tuple<std::conditional_t<std::is_void_v<Ts>, std::monostate, Ts>...>;
     using Ret = std::pair<std::size_t, OutTuple>;

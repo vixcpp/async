@@ -188,14 +188,14 @@ static task<void> test_when_any_picks_first(scheduler &sched)
       delayed_value(sched, 111, 60),
       delayed_value(sched, 222, 10));
 
-  const std::size_t idx = result.first;
   const auto &vals = result.second;
 
-  assert(idx == 1);
+  if (result.first != 1)
+    throw std::runtime_error("when_any: expected index 1");
 
   const auto &v1 = std::get<1>(vals);
-  assert(is_ready(v1));
-  assert(get_value(v1) == 222);
+  if (!is_ready(v1) || get_value(v1) != 222)
+    throw std::runtime_error("when_any: wrong value");
 
   co_return;
 }
@@ -209,14 +209,14 @@ static task<void> test_when_any_handles_immediate(scheduler &sched)
       immediate(7),
       delayed_value(sched, 9, 30));
 
-  const std::size_t idx = result.first;
   const auto &vals = result.second;
 
-  assert(idx == 0);
+  if (result.first != 0)
+    throw std::runtime_error("when_any: expected index 0");
 
   const auto &v0 = std::get<0>(vals);
-  assert(is_ready(v0));
-  assert(get_value(v0) == 7);
+  if (!is_ready(v0) || get_value(v0) != 7)
+    throw std::runtime_error("when_any: wrong value");
 
   co_return;
 }
