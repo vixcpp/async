@@ -25,6 +25,7 @@
 #include <map>
 #include <utility>
 #include <set>
+#include <thread>
 
 #include <vix/async/core/task.hpp>
 #include <vix/async/core/cancel.hpp>
