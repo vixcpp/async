@@ -148,16 +148,17 @@ namespace vix::async::net
     virtual ~tcp_listener() = default;
 
     /**
-     * @brief Asynchronously bind and listen on a TCP endpoint.
+     * @brief Bind and start listening on a TCP endpoint.
+     *
+     * This operation is synchronous and returns only once the listener
+     * is effectively ready to accept incoming connections.
      *
      * @param bind_ep Local endpoint to bind to.
      * @param backlog Maximum pending connection backlog.
      *
-     * @return task<void> that completes once listening starts.
-     *
      * @throws std::system_error on bind or listen failure.
      */
-    virtual core::task<void> async_listen(
+    virtual void listen(
         const tcp_endpoint &bind_ep,
         int backlog = 128) = 0;
 
