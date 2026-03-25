@@ -16,18 +16,20 @@
 #ifndef VIX_ASYNC_THREAD_POOL_HPP
 #define VIX_ASYNC_THREAD_POOL_HPP
 
-#include <cstddef>
+#include <atomic>
+#include <condition_variable>
 #include <coroutine>
+#include <cstddef>
 #include <deque>
+#include <exception>
 #include <functional>
 #include <mutex>
-#include <condition_variable>
+#include <optional>
+#include <system_error>
 #include <thread>
 #include <type_traits>
 #include <utility>
 #include <vector>
-#include <optional>
-#include <system_error>
 
 #include <vix/async/core/cancel.hpp>
 #include <vix/async/core/error.hpp>
@@ -40,165 +42,149 @@ namespace vix::async::core
   namespace detail
   {
     /**
-     * @brief Small result container for thread_pool awaitables.
+     * @brief Storage helper for non-void async task results.
      *
-     * Stores an optional value produced by a compute job and provides
-     * a take() method to move it out when resuming on the awaiting coroutine.
+     * This small helper stores the result produced by a submitted callable
+     * until the awaiting coroutine resumes and extracts it.
      *
      * @tparam R Result type.
      */
     template <typename R>
     struct result_store
     {
-      /**
-       * @brief Stored value (present once job completed successfully).
-       */
+      /** @brief Stored result value. */
       std::optional<R> value{};
 
       /**
-       * @brief Store the result value.
+       * @brief Store a result value.
        *
-       * @param v Value to store.
+       * @param v Result to store.
        */
-      void set(R &&v) { value.emplace(std::move(v)); }
+      void set(R &&v)
+      {
+        value.emplace(std::move(v));
+      }
 
       /**
-       * @brief Move the stored value out.
+       * @brief Extract the stored result.
        *
-       * @return Stored value (moved).
+       * @return Stored result.
        */
-      R take() { return std::move(*value); }
+      R take()
+      {
+        return std::move(*value);
+      }
     };
 
     /**
-     * @brief Specialization for void results.
+     * @brief Storage helper specialization for void results.
+     *
+     * No actual value storage is required for void-returning tasks.
      */
     template <>
     struct result_store<void>
     {
       /**
-       * @brief Store completion for a void job.
+       * @brief Record successful completion for a void task.
        */
       void set() noexcept {}
     };
   } // namespace detail
 
   /**
-   * @brief Simple CPU thread pool integrated with io_context.
+   * @brief Lightweight CPU thread pool for async runtime offloading.
    *
-   * thread_pool runs submitted work on worker threads and resumes awaiting
-   * coroutines back onto the io_context scheduler thread.
+   * This pool is used to execute blocking or CPU-heavy callables outside the
+   * main async scheduler, while resuming coroutines back on the owning
+   * io_context.
    *
-   * The pool supports:
-   * - fire-and-forget submission via submit(std::function<void()>)
-   * - coroutine-friendly submission via submit(Fn, cancel_token) returning task<R>
+   * Design goals:
+   * - simple FIFO execution
+   * - safe shutdown
+   * - coroutine-friendly submission
+   * - idempotent destruction
    *
-   * Cancellation:
-   * - If the provided cancel_token is already cancelled when the worker starts,
-   *   the job fails with a cancellation error (std::system_error(cancelled_ec())).
-   *
-   * Exceptions:
-   * - Exceptions thrown by the job are captured and rethrown on await_resume().
+   * The pool owns a fixed set of worker threads created at construction time.
    */
   class thread_pool
   {
   public:
     /**
-     * @brief Construct a thread pool.
+     * @brief Construct a thread pool attached to an io_context.
      *
-     * @param ctx Runtime context used to post coroutine resumptions.
-     * @param threads Number of worker threads (defaults to hardware concurrency).
+     * @param ctx Owning io_context used to resume coroutines.
+     * @param threads Number of worker threads to create.
+     *        If zero, at least one worker is created.
      */
     explicit thread_pool(
         io_context &ctx,
         std::size_t threads = std::thread::hardware_concurrency());
 
     /**
-     * @brief Destroy the thread pool.
+     * @brief Destroy the thread pool safely.
      *
-     * Stops workers and joins all threads.
+     * Automatically calls shutdown() if needed.
      */
-    ~thread_pool();
+    ~thread_pool() noexcept;
 
-    /**
-     * @brief thread_pool is non-copyable.
-     */
     thread_pool(const thread_pool &) = delete;
-
-    /**
-     * @brief thread_pool is non-copyable.
-     */
     thread_pool &operator=(const thread_pool &) = delete;
 
     /**
-     * @brief Submit a fire-and-forget job to the pool.
+     * @brief Submit a plain callable for background execution.
      *
-     * @param fn Job to execute.
+     * The callable is queued and executed by one worker thread.
+     *
+     * @param fn Callable to execute.
      */
     void submit(std::function<void()> fn);
 
     /**
-     * @brief Submit a job to the pool and co_await its result.
+     * @brief Submit a callable and await its result as a coroutine task.
      *
-     * This overload wraps the job into an awaitable that:
-     * - enqueues the job on the worker queue
-     * - runs the job on a worker thread
-     * - captures the result or exception
-     * - posts the awaiting coroutine back onto the io_context scheduler
+     * The callable is executed on the thread pool, then the awaiting coroutine
+     * is resumed back on the owning io_context.
+     *
+     * If the cancellation token is already cancelled before execution starts,
+     * the coroutine resumes with a cancelled system_error.
      *
      * @tparam Fn Callable type.
-     * @param fn Callable to execute on the pool.
-     * @param ct Cancellation token.
-     * @return task<R> where R is std::invoke_result_t<Fn>.
+     * @param fn Callable to execute.
+     * @param ct Optional cancellation token.
      *
-     * @throws std::system_error with cancelled_ec() when cancellation is observed.
-     * @throws Any exception thrown by the callable (re-thrown on await_resume()).
+     * @return Async task producing the callable result type.
      */
     template <typename Fn>
     auto submit(Fn &&fn, cancel_token ct = {}) -> task<std::invoke_result_t<Fn>>
     {
       using R = std::invoke_result_t<Fn>;
 
-      /**
-       * @brief Awaitable implementing the pool submission behavior.
-       */
       struct awaitable
       {
-        /**
-         * @brief Target pool.
-         */
+        /** @brief Pool used to enqueue the callable. */
         thread_pool *pool{};
 
-        /**
-         * @brief Cancellation token.
-         */
+        /** @brief Optional cancellation token. */
         cancel_token ct{};
 
-        /**
-         * @brief Stored callable (decayed).
-         */
+        /** @brief Callable to execute in the pool. */
         std::decay_t<Fn> fn;
 
-        /**
-         * @brief Storage for result (or completion for void).
-         */
+        /** @brief Storage for the callable result. */
         detail::result_store<R> store{};
 
-        /**
-         * @brief Captured exception from worker execution.
-         */
+        /** @brief Captured exception, if execution fails. */
         std::exception_ptr ex{};
 
         /**
-         * @brief Always suspend to run on a worker thread.
+         * @brief Always suspend and dispatch work to the pool.
+         *
+         * @return false to force suspension.
          */
         bool await_ready() const noexcept { return false; }
 
         /**
-         * @brief Enqueue the job and suspend the awaiting coroutine.
-         *
-         * The job executes on a worker thread and then posts the awaiting
-         * coroutine handle back onto the io_context.
+         * @brief Enqueue the callable and resume the coroutine later.
          *
          * @param h Awaiting coroutine handle.
          */
@@ -206,42 +192,45 @@ namespace vix::async::core
         {
           pool->enqueue([this, h]() mutable
                         {
-        try
-        {
-          if (ct.is_cancelled())
-            throw std::system_error(cancelled_ec());
+            try
+            {
+              if (ct.is_cancelled())
+              {
+                throw std::system_error(cancelled_ec());
+              }
 
-          if constexpr (std::is_void_v<R>)
-          {
-            fn();
-            store.set();
-          }
-          else
-          {
-            R r = fn();
-            store.set(std::move(r));
-          }
-        }
-        catch (...)
-        {
-          ex = std::current_exception();
-        }
+              if constexpr (std::is_void_v<R>)
+              {
+                fn();
+                store.set();
+              }
+              else
+              {
+                R r = fn();
+                store.set(std::move(r));
+              }
+            }
+            catch (...)
+            {
+              ex = std::current_exception();
+            }
 
-        pool->ctx_post(h); });
+            pool->ctx_post(h); });
         }
 
         /**
-         * @brief Resume on the scheduler thread and return the result.
+         * @brief Resume and return or rethrow the execution result.
          *
-         * Rethrows any exception captured in the worker thread.
+         * @return Result produced by the callable.
          *
-         * @return For non-void jobs: computed result (moved). For void: returns void.
-         * @throws Any exception thrown by the job (re-thrown here).
+         * @throw Any exception captured during execution.
          */
         R await_resume()
         {
           if (ex)
+          {
             std::rethrow_exception(ex);
+          }
 
           if constexpr (std::is_void_v<R>)
           {
@@ -258,70 +247,74 @@ namespace vix::async::core
     }
 
     /**
-     * @brief Request the pool to stop.
+     * @brief Request the pool to stop accepting and processing new work.
      *
-     * Signals worker threads to exit. Pending jobs may still run depending
-     * on implementation of worker_loop().
+     * This wakes all workers so they can exit once pending work is drained
+     * according to the worker loop logic.
      */
     void stop() noexcept;
 
     /**
-     * @brief Number of worker threads in the pool.
+     * @brief Stop the pool and join all workers safely.
      *
-     * @return Worker count.
+     * This operation is idempotent and safe to call multiple times.
+     * It also protects against self-join during destruction.
      */
-    std::size_t size() const noexcept { return workers_.size(); }
+    void shutdown() noexcept;
+
+    /**
+     * @brief Return the number of worker threads owned by the pool.
+     *
+     * @return Number of workers.
+     */
+    [[nodiscard]] std::size_t size() const noexcept { return workers_.size(); }
 
   private:
     /**
-     * @brief Worker thread loop that consumes queued jobs.
+     * @brief Worker thread main loop.
+     *
+     * Waits for queued work, executes callables, and exits when shutdown is
+     * requested and no work remains.
      */
     void worker_loop();
 
     /**
-     * @brief Enqueue a job into the worker queue.
+     * @brief Enqueue one callable into the worker queue.
      *
-     * @param fn Job to enqueue.
+     * @param fn Callable to enqueue.
      */
     void enqueue(std::function<void()> fn);
 
     /**
-     * @brief Post a coroutine continuation back onto the io_context scheduler.
+     * @brief Post a coroutine handle back to the owning io_context.
      *
      * @param h Coroutine handle to resume.
      */
     void ctx_post(std::coroutine_handle<> h);
 
   private:
-    /**
-     * @brief Bound runtime context.
-     */
+    /** @brief Owning io_context used for coroutine resumption. */
     io_context &ctx_;
 
-    /**
-     * @brief Mutex protecting job queue and stop flag.
-     */
+    /** @brief Mutex protecting queue and stop state. */
     mutable std::mutex m_;
 
-    /**
-     * @brief Condition variable to wake workers.
-     */
+    /** @brief Condition variable used to wake worker threads. */
     std::condition_variable cv_;
 
-    /**
-     * @brief FIFO job queue executed by workers.
-     */
+    /** @brief FIFO queue of pending callables. */
     std::deque<std::function<void()>> q_;
 
-    /**
-     * @brief Stop request flag observed by worker threads.
-     */
+    /** @brief Stop flag checked by workers and enqueue logic. */
     bool stop_{false};
 
-    /**
-     * @brief Worker threads.
-     */
+    /** @brief Owned worker threads. */
     std::vector<std::thread> workers_;
+
+    /**
+     * @brief Ensures shutdown and worker joining happen only once.
+     */
+    std::atomic<bool> shutdown_done_{false};
   };
 
 } // namespace vix::async::core

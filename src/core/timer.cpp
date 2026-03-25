@@ -15,8 +15,8 @@
 #include <vix/async/core/io_context.hpp>
 
 #include <functional>
-#include <system_error>
 #include <memory>
+#include <system_error>
 #include <thread>
 
 namespace vix::async::core
@@ -31,8 +31,34 @@ namespace vix::async::core
   timer::~timer()
   {
     stop();
-    if (worker_.joinable())
+
+    if (!worker_.joinable())
+    {
+      return;
+    }
+
+    const auto self_id = std::this_thread::get_id();
+
+    if (worker_.get_id() == self_id)
+    {
+      worker_.detach();
+      return;
+    }
+
+    try
+    {
       worker_.join();
+    }
+    catch (...)
+    {
+      try
+      {
+        worker_.detach();
+      }
+      catch (...)
+      {
+      }
+    }
   }
 
   void timer::stop() noexcept
@@ -40,7 +66,6 @@ namespace vix::async::core
     {
       std::lock_guard<std::mutex> lock(m_);
       stop_ = true;
-
       q_.clear();
     }
     cv_.notify_all();
@@ -49,12 +74,16 @@ namespace vix::async::core
   void timer::schedule(time_point tp, std::unique_ptr<job> j, cancel_token ct)
   {
     if (!j)
+    {
       return;
+    }
 
     {
       std::lock_guard<std::mutex> lock(m_);
       if (stop_)
+      {
         return;
+      }
 
       entry e;
       e.when = tp;
@@ -80,14 +109,24 @@ namespace vix::async::core
 
       void await_suspend(std::coroutine_handle<> h)
       {
-        self->after(d, [h]() mutable
-                    { if (h) h.resume(); }, ct);
+        self->after(
+            d,
+            [h]() mutable
+            {
+              if (h)
+              {
+                h.resume();
+              }
+            },
+            ct);
       }
 
       void await_resume()
       {
         if (ct.is_cancelled())
+        {
           throw std::system_error(cancelled_ec());
+        }
       }
     };
 
@@ -125,17 +164,23 @@ namespace vix::async::core
       }
 
       if (!has_next)
+      {
         continue;
+      }
 
       while (true)
       {
-        auto now = clock::now();
+        const auto now = clock::now();
         if (now >= next.when)
+        {
           break;
+        }
 
         std::unique_lock<std::mutex> lock(m_);
         if (stop_)
+        {
           return;
+        }
 
         if (!q_.empty())
         {
@@ -153,8 +198,11 @@ namespace vix::async::core
 
         cv_.wait_until(lock, next.when, [&]()
                        { return stop_; });
+
         if (stop_)
+        {
           return;
+        }
       }
 
       if (next.ct.is_cancelled())
@@ -167,8 +215,10 @@ namespace vix::async::core
         std::shared_ptr<job> j(next.j.release());
         ctx_post([j = std::move(j)]() mutable
                  {
-             if (j)
-               j->run(); });
+                   if (j)
+                   {
+                     j->run();
+                   } });
       }
     }
   }

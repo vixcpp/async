@@ -20,33 +20,100 @@
 namespace vix::async::core
 {
   io_context::io_context() = default;
-  io_context::~io_context() = default;
+
+  io_context::~io_context() noexcept
+  {
+    shutdown();
+  }
+
+  void io_context::shutdown() noexcept
+  {
+    bool expected = false;
+    if (!shutdown_done_.compare_exchange_strong(
+            expected,
+            true,
+            std::memory_order_acq_rel,
+            std::memory_order_acquire))
+    {
+      return;
+    }
+
+    std::lock_guard<std::mutex> lock(shutdown_mutex_);
+
+    try
+    {
+      sched_.stop();
+    }
+    catch (...)
+    {
+    }
+
+    try
+    {
+      net_.reset();
+    }
+    catch (...)
+    {
+    }
+
+    try
+    {
+      signals_.reset();
+    }
+    catch (...)
+    {
+    }
+
+    try
+    {
+      timer_.reset();
+    }
+    catch (...)
+    {
+    }
+
+    try
+    {
+      cpu_pool_.reset();
+    }
+    catch (...)
+    {
+    }
+  }
 
   thread_pool &io_context::cpu_pool()
   {
     if (!cpu_pool_)
+    {
       cpu_pool_ = std::make_unique<thread_pool>(*this);
+    }
     return *cpu_pool_;
   }
 
   timer &io_context::timers()
   {
     if (!timer_)
+    {
       timer_ = std::make_unique<timer>(*this);
+    }
     return *timer_;
   }
 
   signal_set &io_context::signals()
   {
     if (!signals_)
+    {
       signals_ = std::make_unique<signal_set>(*this);
+    }
     return *signals_;
   }
 
   vix::async::net::detail::asio_net_service &io_context::net()
   {
     if (!net_)
+    {
       net_ = std::make_unique<vix::async::net::detail::asio_net_service>(*this);
+    }
     return *net_;
   }
 

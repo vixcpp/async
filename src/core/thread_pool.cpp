@@ -21,9 +21,12 @@ namespace vix::async::core
       : ctx_(ctx)
   {
     if (threads == 0)
+    {
       threads = 1;
+    }
 
     workers_.reserve(threads);
+
     for (std::size_t i = 0; i < threads; ++i)
     {
       workers_.emplace_back([this]()
@@ -31,20 +34,17 @@ namespace vix::async::core
     }
   }
 
-  thread_pool::~thread_pool()
+  thread_pool::~thread_pool() noexcept
   {
-    stop();
-    for (auto &t : workers_)
-    {
-      if (t.joinable())
-        t.join();
-    }
+    shutdown();
   }
 
   void thread_pool::submit(std::function<void()> fn)
   {
     if (!fn)
+    {
       return;
+    }
 
     enqueue(std::move(fn));
   }
@@ -55,17 +55,75 @@ namespace vix::async::core
       std::lock_guard<std::mutex> lock(m_);
       stop_ = true;
     }
+
     cv_.notify_all();
+  }
+
+  void thread_pool::shutdown() noexcept
+  {
+    bool expected = false;
+    if (!shutdown_done_.compare_exchange_strong(
+            expected,
+            true,
+            std::memory_order_acq_rel,
+            std::memory_order_acquire))
+    {
+      return;
+    }
+
+    {
+      std::lock_guard<std::mutex> lock(m_);
+      stop_ = true;
+    }
+    cv_.notify_all();
+
+    const std::thread::id self_id = std::this_thread::get_id();
+
+    for (auto &t : workers_)
+    {
+      if (!t.joinable())
+      {
+        continue;
+      }
+
+      if (t.get_id() == self_id)
+      {
+        t.detach();
+        continue;
+      }
+
+      try
+      {
+        t.join();
+      }
+      catch (...)
+      {
+        try
+        {
+          t.detach();
+        }
+        catch (...)
+        {
+        }
+      }
+    }
+
+    workers_.clear();
   }
 
   void thread_pool::enqueue(std::function<void()> fn)
   {
     {
       std::lock_guard<std::mutex> lock(m_);
+
       if (stop_)
+      {
         return;
+      }
+
       q_.push_back(std::move(fn));
     }
+
     cv_.notify_one();
   }
 

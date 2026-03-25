@@ -14,6 +14,7 @@
 #include <vix/async/core/signal.hpp>
 #include <vix/async/core/io_context.hpp>
 
+#include <chrono>
 #include <system_error>
 
 #if defined(__unix__) || defined(__APPLE__)
@@ -32,8 +33,34 @@ namespace vix::async::core
   signal_set::~signal_set()
   {
     stop();
-    if (worker_.joinable())
+
+    if (!worker_.joinable())
+    {
+      return;
+    }
+
+    const auto self_id = std::this_thread::get_id();
+
+    if (worker_.get_id() == self_id)
+    {
+      worker_.detach();
+      return;
+    }
+
+    try
+    {
       worker_.join();
+    }
+    catch (...)
+    {
+      try
+      {
+        worker_.detach();
+      }
+      catch (...)
+      {
+      }
+    }
   }
 
   void signal_set::add(int sig)
@@ -48,9 +75,13 @@ namespace vix::async::core
     for (auto it = signals_.begin(); it != signals_.end();)
     {
       if (*it == sig)
+      {
         it = signals_.erase(it);
+      }
       else
+      {
         ++it;
+      }
     }
   }
 
@@ -62,21 +93,17 @@ namespace vix::async::core
 
   void signal_set::stop() noexcept
   {
-    {
-      std::lock_guard<std::mutex> lock(m_);
-      stop_ = true;
-    }
-
-#if defined(__unix__) || defined(__APPLE__)
-    ::pthread_kill(worker_.native_handle(), SIGTERM);
-#endif
+    std::lock_guard<std::mutex> lock(m_);
+    stop_ = true;
   }
 
   void signal_set::start_if_needed()
   {
     std::lock_guard<std::mutex> lock(m_);
     if (started_)
+    {
       return;
+    }
 
     started_ = true;
     worker_ = std::thread([this]()
@@ -100,7 +127,6 @@ namespace vix::async::core
     {
       signal_set *self;
       cancel_token ct;
-
       int sig{0};
 
       bool await_ready()
@@ -122,7 +148,11 @@ namespace vix::async::core
         if (ct.is_cancelled())
         {
           self->ctx_post([h]() mutable
-                         { if (h) h.resume(); });
+                         {
+                           if (h)
+                           {
+                             h.resume();
+                           } });
           return;
         }
 
@@ -130,8 +160,13 @@ namespace vix::async::core
         {
           sig = self->pending_.front();
           self->pending_.pop();
+
           self->ctx_post([h]() mutable
-                         { if (h) h.resume(); });
+                         {
+                           if (h)
+                           {
+                             h.resume();
+                           } });
           return;
         }
 
@@ -142,7 +177,9 @@ namespace vix::async::core
       int await_resume()
       {
         if (ct.is_cancelled())
+        {
           throw std::system_error(cancelled_ec());
+        }
 
         return sig;
       }
@@ -163,7 +200,9 @@ namespace vix::async::core
       {
         std::lock_guard<std::mutex> lock(m_);
         if (stop_)
+        {
           return;
+        }
 
         sigs_copy = signals_;
       }
@@ -177,7 +216,9 @@ namespace vix::async::core
       sigset_t set;
       sigemptyset(&set);
       for (int s : sigs_copy)
+      {
         sigaddset(&set, s);
+      }
 
       pthread_sigmask(SIG_BLOCK, &set, nullptr);
 
@@ -193,54 +234,60 @@ namespace vix::async::core
       {
         std::lock_guard<std::mutex> lock(m_);
         if (stop_)
+        {
           return;
+        }
 
         pending_.push(received);
       }
 
       ctx_post([this]()
                {
-      int sig = 0;
-      std::function<void(int)> handler;
-      std::coroutine_handle<> waiter;
-      bool has_waiter = false;
+                 int sig = 0;
+                 std::function<void(int)> handler;
+                 std::coroutine_handle<> waiter;
+                 bool has_waiter = false;
 
-      {
-        std::lock_guard<std::mutex> lock(m_);
+                 {
+                   std::lock_guard<std::mutex> lock(m_);
 
-        if (pending_.empty())
-          return;
+                   if (pending_.empty())
+                   {
+                     return;
+                   }
 
-        sig = pending_.front();
-        pending_.pop();
+                   sig = pending_.front();
+                   pending_.pop();
 
-        handler = on_signal_;
+                   handler = on_signal_;
 
-        if (waiter_active_)
-        {
-          waiter = waiter_;
-          waiter_ = {};
-          waiter_active_ = false;
-          has_waiter = true;
-        }
-      }
+                   if (waiter_active_)
+                   {
+                     waiter = waiter_;
+                     waiter_ = {};
+                     waiter_active_ = false;
+                     has_waiter = true;
+                   }
+                 }
 
-      if (handler)
-        handler(sig);
+                 if (handler)
+                 {
+                   handler(sig);
+                 }
 
-      if (has_waiter && waiter)
-      {
-        {
-          std::lock_guard<std::mutex> lock(m_);
-          pending_.push(sig);
-        }
-        waiter.resume();
-      }
-      else
-      {
-        std::lock_guard<std::mutex> lock(m_);
-        pending_.push(sig);
-      } });
+                 if (has_waiter && waiter)
+                 {
+                   {
+                     std::lock_guard<std::mutex> lock(m_);
+                     pending_.push(sig);
+                   }
+                   waiter.resume();
+                 }
+                 else
+                 {
+                   std::lock_guard<std::mutex> lock(m_);
+                   pending_.push(sig);
+                 } });
     }
 #endif
   }

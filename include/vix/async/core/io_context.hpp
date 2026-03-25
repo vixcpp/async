@@ -16,20 +16,16 @@
 #ifndef VIX_ASYNC_IO_CONTEXT_HPP
 #define VIX_ASYNC_IO_CONTEXT_HPP
 
+#include <atomic>
 #include <coroutine>
 #include <memory>
+#include <mutex>
 #include <utility>
 
 #include <vix/async/core/scheduler.hpp>
 
 namespace vix::async::net::detail
 {
-  /**
-   * @brief Internal networking service (Asio-backed).
-   *
-   * This type is forward-declared to keep io_context lightweight and
-   * avoid pulling networking implementation details into the public API.
-   */
   class asio_net_service;
 }
 
@@ -40,69 +36,65 @@ namespace vix::async::core
   class signal_set;
 
   /**
-   * @brief Core runtime context for async operations.
+   * @brief Central asynchronous execution context.
    *
-   * io_context owns a scheduler that drives coroutine continuations and
-   * posted tasks. It also exposes lazily-created services used by higher
-   * level facilities:
-   * - CPU thread pool for compute-bound work
-   * - timers for scheduling time-based events
-   * - signals for signal handling
-   * - net for networking (implementation detail service)
+   * io_context is the core coordination object of the async runtime.
    *
-   * The context is non-copyable and typically lives for the duration of
-   * the program or subsystem using it.
+   * It provides:
+   * - a scheduler for coroutine and task execution
+   * - a CPU thread pool for blocking or heavy work
+   * - a timer service for delayed execution
+   * - a signal handling service
+   * - a networking backend (asio-based)
+   *
+   * Services are lazily initialized and owned by the context.
+   *
+   * Lifecycle:
+   * - Services are created on first use
+   * - shutdown() stops the scheduler and destroys all services
+   * - destruction is safe and idempotent
+   *
+   * Thread-safety:
+   * - posting tasks is thread-safe
+   * - shutdown is serialized and idempotent
    */
   class io_context
   {
   public:
     /**
-     * @brief Construct a new io_context.
-     *
-     * Initializes the underlying scheduler. Optional services are created
-     * lazily on first access through their corresponding accessors.
+     * @brief Construct an empty io_context.
      */
     io_context();
 
     /**
-     * @brief Destroy the io_context.
+     * @brief Destroy the io_context and release all resources.
      *
-     * Destroys any lazily-initialized services and the scheduler.
+     * Automatically calls shutdown() if not already done.
      */
-    ~io_context();
+    ~io_context() noexcept;
 
-    /**
-     * @brief io_context is non-copyable.
-     */
     io_context(const io_context &) = delete;
-
-    /**
-     * @brief io_context is non-copyable.
-     */
     io_context &operator=(const io_context &) = delete;
 
     /**
-     * @brief Access the underlying scheduler.
+     * @brief Access the internal scheduler.
      *
-     * @return Reference to the scheduler.
+     * @return Reference to scheduler.
      */
-    scheduler &get_scheduler() noexcept { return sched_; }
+    [[nodiscard]] scheduler &get_scheduler() noexcept { return sched_; }
 
     /**
-     * @brief Access the underlying scheduler.
+     * @brief Access the internal scheduler (const).
      *
-     * @return Const reference to the scheduler.
+     * @return Const reference to scheduler.
      */
-    const scheduler &get_scheduler() const noexcept { return sched_; }
+    [[nodiscard]] const scheduler &get_scheduler() const noexcept { return sched_; }
 
     /**
-     * @brief Post a callable to be executed by the scheduler.
-     *
-     * The callable is forwarded into the scheduler queue and will be
-     * executed when run() drives the scheduler.
+     * @brief Post a callable task to the scheduler.
      *
      * @tparam Fn Callable type.
-     * @param fn Callable to enqueue.
+     * @param fn Task to execute.
      */
     template <typename Fn>
     void post(Fn &&fn)
@@ -111,7 +103,7 @@ namespace vix::async::core
     }
 
     /**
-     * @brief Post a coroutine continuation to be resumed by the scheduler.
+     * @brief Post a coroutine handle to the scheduler.
      *
      * @param h Coroutine handle to resume.
      */
@@ -121,10 +113,9 @@ namespace vix::async::core
     }
 
     /**
-     * @brief Run the scheduler event loop.
+     * @brief Run the scheduler loop.
      *
-     * This call typically blocks and processes queued tasks until stop()
-     * is called or the scheduler decides to return.
+     * Blocks until stop() is called.
      */
     void run()
     {
@@ -134,7 +125,7 @@ namespace vix::async::core
     /**
      * @brief Stop the scheduler.
      *
-     * Signals the scheduler to stop processing and return from run().
+     * Causes run() to exit.
      */
     void stop() noexcept
     {
@@ -142,88 +133,83 @@ namespace vix::async::core
     }
 
     /**
-     * @brief Check whether the scheduler is currently running.
+     * @brief Check whether the scheduler is running.
      *
      * @return true if running, false otherwise.
      */
-    bool is_running() const noexcept
+    [[nodiscard]] bool is_running() const noexcept
     {
       return sched_.is_running();
     }
 
     /**
-     * @name Lazy services
+     * @brief Access the CPU thread pool.
      *
-     * Services below are initialized on first access and are owned by
-     * this io_context instance.
+     * Lazily initialized.
      *
-     * @{
+     * @return Reference to thread_pool.
      */
+    [[nodiscard]] thread_pool &cpu_pool();
 
     /**
-     * @brief Access the CPU thread pool service.
+     * @brief Access the timer service.
      *
-     * Lazily constructs the pool on first call.
+     * Lazily initialized.
      *
-     * @return Reference to the thread_pool service.
+     * @return Reference to timer.
      */
-    thread_pool &cpu_pool();
-
-    /**
-     * @brief Access the timers service.
-     *
-     * Lazily constructs the timer service on first call.
-     *
-     * @return Reference to the timer service.
-     */
-    timer &timers();
+    [[nodiscard]] timer &timers();
 
     /**
      * @brief Access the signal handling service.
      *
-     * Lazily constructs the signal_set service on first call.
+     * Lazily initialized.
      *
-     * @return Reference to the signal_set service.
+     * @return Reference to signal_set.
      */
-    signal_set &signals();
+    [[nodiscard]] signal_set &signals();
 
     /**
-     * @brief Access the networking service.
+     * @brief Access the networking backend service.
      *
-     * Lazily constructs the internal Asio-backed networking service on
-     * first call. The type is intentionally kept in a detail namespace.
+     * Lazily initialized.
      *
-     * @return Reference to the asio_net_service.
+     * @return Reference to asio_net_service.
      */
-    vix::async::net::detail::asio_net_service &net();
+    [[nodiscard]] vix::async::net::detail::asio_net_service &net();
 
-    /** @} */
+    /**
+     * @brief Stop scheduler and destroy all services.
+     *
+     * This function:
+     * - stops the scheduler
+     * - destroys all lazily created services
+     *
+     * It is safe to call multiple times.
+     */
+    void shutdown() noexcept;
 
   private:
-    /**
-     * @brief Primary scheduler driving task execution and coroutine resumption.
-     */
+    /** @brief Core scheduler. */
     scheduler sched_;
 
-    /**
-     * @brief Lazily-created CPU pool.
-     */
+    /** @brief CPU thread pool (lazy). */
     std::unique_ptr<thread_pool> cpu_pool_;
 
-    /**
-     * @brief Lazily-created timers service.
-     */
+    /** @brief Timer service (lazy). */
     std::unique_ptr<timer> timer_;
 
-    /**
-     * @brief Lazily-created signals service.
-     */
+    /** @brief Signal handling service (lazy). */
     std::unique_ptr<signal_set> signals_;
 
-    /**
-     * @brief Lazily-created networking service.
-     */
+    /** @brief Networking backend (lazy). */
     std::unique_ptr<vix::async::net::detail::asio_net_service> net_;
+
+    /** @brief Ensures shutdown runs once. */
+    std::atomic<bool> shutdown_done_{false};
+
+    /** @brief Protects shutdown sequence. */
+    std::mutex shutdown_mutex_;
   };
 
 } // namespace vix::async::core
