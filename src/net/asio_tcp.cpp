@@ -135,7 +135,9 @@ namespace vix::async::net
     {
     }
 
-    void listen(const tcp_endpoint &bind_ep, int backlog) override
+    vix::async::core::task<void> async_listen(
+        const tcp_endpoint &bind_ep,
+        int backlog = 128) override
     {
       tcp::endpoint ep(asio::ip::make_address(bind_ep.host), bind_ep.port);
 
@@ -155,10 +157,11 @@ namespace vix::async::net
       acc_.listen(backlog, ec);
       if (ec)
         throw std::system_error(ec);
+
+      co_return;
     }
 
-    vix::async::core::task<std::unique_ptr<tcp_stream>> async_accept(
-        vix::async::core::cancel_token ct) override
+    vix::async::core::task<std::unique_ptr<tcp_stream>> async_accept(vix::async::core::cancel_token ct) override
     {
       auto client = std::make_unique<tcp_stream_asio>(ctx_);
 
