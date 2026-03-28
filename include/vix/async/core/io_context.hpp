@@ -20,6 +20,7 @@
 #include <coroutine>
 #include <memory>
 #include <mutex>
+#include <stdexcept>
 #include <utility>
 
 #include <vix/async/core/scheduler.hpp>
@@ -56,7 +57,9 @@ namespace vix::async::core
    *
    * Thread-safety:
    * - posting tasks is thread-safe
+   * - lazy service initialization is serialized
    * - shutdown is serialized and idempotent
+   * - services cannot be recreated after shutdown
    */
   class io_context
   {
@@ -81,14 +84,20 @@ namespace vix::async::core
      *
      * @return Reference to scheduler.
      */
-    [[nodiscard]] scheduler &get_scheduler() noexcept { return sched_; }
+    [[nodiscard]] scheduler &get_scheduler() noexcept
+    {
+      return sched_;
+    }
 
     /**
      * @brief Access the internal scheduler (const).
      *
      * @return Const reference to scheduler.
      */
-    [[nodiscard]] const scheduler &get_scheduler() const noexcept { return sched_; }
+    [[nodiscard]] const scheduler &get_scheduler() const noexcept
+    {
+      return sched_;
+    }
 
     /**
      * @brief Post a callable task to the scheduler.
@@ -145,36 +154,44 @@ namespace vix::async::core
     /**
      * @brief Access the CPU thread pool.
      *
-     * Lazily initialized.
+     * Lazily initialized on first access.
      *
      * @return Reference to thread_pool.
+     *
+     * @throws std::runtime_error If the context has already been shut down.
      */
     [[nodiscard]] thread_pool &cpu_pool();
 
     /**
      * @brief Access the timer service.
      *
-     * Lazily initialized.
+     * Lazily initialized on first access.
      *
      * @return Reference to timer.
+     *
+     * @throws std::runtime_error If the context has already been shut down.
      */
     [[nodiscard]] timer &timers();
 
     /**
      * @brief Access the signal handling service.
      *
-     * Lazily initialized.
+     * Lazily initialized on first access.
      *
      * @return Reference to signal_set.
+     *
+     * @throws std::runtime_error If the context has already been shut down.
      */
     [[nodiscard]] signal_set &signals();
 
     /**
      * @brief Access the networking backend service.
      *
-     * Lazily initialized.
+     * Lazily initialized on first access.
      *
      * @return Reference to asio_net_service.
+     *
+     * @throws std::runtime_error If the context has already been shut down.
      */
     [[nodiscard]] vix::async::net::detail::asio_net_service &net();
 
@@ -188,6 +205,30 @@ namespace vix::async::core
      * It is safe to call multiple times.
      */
     void shutdown() noexcept;
+
+  private:
+    /**
+     * @brief Check whether shutdown has already completed.
+     *
+     * @return true if the context is shut down, false otherwise.
+     */
+    [[nodiscard]] bool is_shutdown() const noexcept
+    {
+      return shutdown_done_.load(std::memory_order_acquire);
+    }
+
+    /**
+     * @brief Ensure that the context is still usable.
+     *
+     * @throws std::runtime_error If the context has already been shut down.
+     */
+    void ensure_not_shutdown() const
+    {
+      if (is_shutdown())
+      {
+        throw std::runtime_error("io_context is shut down");
+      }
+    }
 
   private:
     /** @brief Core scheduler. */
@@ -208,8 +249,16 @@ namespace vix::async::core
     /** @brief Ensures shutdown runs once. */
     std::atomic<bool> shutdown_done_{false};
 
-    /** @brief Protects shutdown sequence. */
-    std::mutex shutdown_mutex_;
+    /**
+     * @brief Protects lifecycle operations.
+     *
+     * This mutex serializes:
+     * - lazy service initialization
+     * - shutdown
+     *
+     * It prevents races between service creation and destruction.
+     */
+    mutable std::mutex lifecycle_mutex_;
   };
 
 } // namespace vix::async::core
