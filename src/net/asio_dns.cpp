@@ -17,7 +17,16 @@
 #include "asio_net_service.hpp"
 #include "asio_await.hpp"
 
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wnull-dereference"
+#endif
+
 #include <asio/ip/tcp.hpp>
+
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
 
 namespace vix::async::net
 {

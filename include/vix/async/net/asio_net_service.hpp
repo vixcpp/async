@@ -19,14 +19,22 @@
 #include <memory>
 #include <thread>
 
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wnull-dereference"
+#endif
+
 #include <asio/io_context.hpp>
 #include <asio/executor_work_guard.hpp>
+
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
 
 namespace vix::async::core
 {
   class io_context;
 }
-
 namespace vix::async::net::detail
 {
   /**

@@ -31,7 +31,7 @@ static task<int> add_one(int x)
   co_return x + 1;
 }
 
-static task<int> chain()
+[[maybe_unused]] static task<int> chain()
 {
   int v = co_await compute_value();
   int r = co_await add_one(v);
