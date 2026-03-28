@@ -41,7 +41,9 @@ function(vix_async_link_asio onto link_scope)
   # Standalone mode: try module-local first
   set(_asio_local "${CMAKE_CURRENT_LIST_DIR}/third_party/asio/include")
   if (EXISTS "${_asio_local}/asio.hpp")
-    target_include_directories(${onto} SYSTEM ${link_scope} "${_asio_local}")
+    target_include_directories(${onto} SYSTEM ${link_scope}
+      $<BUILD_INTERFACE:${_asio_local}>
+    )
     target_compile_definitions(${onto} ${link_scope} VIX_ASYNC_WITH_ASIO=1)
     message(STATUS "[async] Asio: using module-local Asio at ${_asio_local}")
     return()
