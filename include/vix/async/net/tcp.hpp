@@ -158,7 +158,7 @@ namespace vix::async::net
      *
      * @throws std::system_error on bind or listen failure.
      */
-    virtual void listen(
+    virtual core::task<void> async_listen(
         const tcp_endpoint &bind_ep,
         int backlog = 128) = 0;
 
