@@ -126,7 +126,6 @@ vix_async_apply_asio_common(vix_async PUBLIC)
 
 # Warnings / sanitizers (module local)
 async_apply_warnings(vix_async)
-async_apply_sanitizers(vix_async)
 
 set_target_properties(vix_async PROPERTIES
   CXX_EXTENSIONS OFF
