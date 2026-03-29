@@ -20,8 +20,7 @@
 namespace vix::async::net::detail
 {
 
-  asio_net_service::asio_net_service(vix::async::core::io_context &ctx)
-      : ctx_(ctx)
+  asio_net_service::asio_net_service(vix::async::core::io_context &)
   {
     guard_ = std::make_unique<guard_t>(asio::make_work_guard(ioc_));
 

@@ -43,7 +43,6 @@ namespace vix::async::net::detail
     void stop() noexcept;
 
   private:
-    vix::async::core::io_context &ctx_;
     asio::io_context ioc_;
     std::unique_ptr<guard_t> guard_;
     std::thread net_thread_;
