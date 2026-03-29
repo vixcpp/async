@@ -20,7 +20,6 @@ include(GNUInstallDirs)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(AsyncOptions)
 include(AsyncWarnings)
-include(AsyncSanitizers)
 
 # ----------------------------------------------------
 # Asio policy (same spirit as p2p)
