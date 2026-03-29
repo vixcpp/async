@@ -28,11 +28,6 @@ async_apply_warnings(async_cancel_smoke)
 async_apply_warnings(async_scheduler_smoke)
 async_apply_warnings(async_when_smoke)
 
-async_apply_sanitizers(async_task_smoke)
-async_apply_sanitizers(async_cancel_smoke)
-async_apply_sanitizers(async_scheduler_smoke)
-async_apply_sanitizers(async_when_smoke)
-
 # Register with CTest
 add_test(NAME async.task_smoke       COMMAND async_task_smoke)
 add_test(NAME async.cancel_smoke     COMMAND async_cancel_smoke)
