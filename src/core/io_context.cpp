@@ -18,6 +18,8 @@
 #include <vix/async/core/timer.hpp>
 #include <vix/async/net/asio_net_service.hpp>
 
+#include <memory>
+#include <mutex>
 #include <utility>
 
 namespace vix::async::core

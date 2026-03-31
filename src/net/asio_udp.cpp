@@ -19,9 +19,42 @@
 
 #include <asio/ip/udp.hpp>
 
+#include <memory>
+#include <span>
+#include <string>
+#include <system_error>
+#include <utility>
+
 namespace vix::async::net
 {
   using udp = asio::ip::udp;
+
+  namespace detail
+  {
+    template <typename Starter>
+    inline vix::async::core::task<void> co_asio_void(
+        core::io_context &ctx,
+        core::cancel_token ct,
+        Starter &&starter)
+    {
+      co_await asio_awaitable<std::decay_t<Starter>, void>{
+          &ctx,
+          std::move(ct),
+          std::forward<Starter>(starter)};
+    }
+
+    template <typename T, typename Starter>
+    inline vix::async::core::task<T> co_asio_value(
+        core::io_context &ctx,
+        core::cancel_token ct,
+        Starter &&starter)
+    {
+      co_return co_await asio_awaitable<std::decay_t<Starter>, T>{
+          &ctx,
+          std::move(ct),
+          std::forward<Starter>(starter)};
+    }
+  } // namespace detail
 
   class udp_socket_asio final : public udp_socket
   {
@@ -37,13 +70,18 @@ namespace vix::async::net
       udp::endpoint ep(asio::ip::make_address(bind_ep.host), bind_ep.port);
 
       std::error_code ec;
+
       sock_.open(ep.protocol(), ec);
       if (ec)
+      {
         throw std::system_error(ec);
+      }
 
       sock_.bind(ep, ec);
       if (ec)
+      {
         throw std::system_error(ec);
+      }
 
       co_return;
     }
@@ -55,21 +93,21 @@ namespace vix::async::net
     {
       udp::endpoint dst(asio::ip::make_address(to.host), to.port);
 
-      auto sent = co_await detail::asio_awaitable<
-          std::function<void(std::function<void(std::error_code, std::size_t)>)>,
-          std::size_t>{
-          &ctx_, ct,
+      co_return co_await detail::co_asio_value<std::size_t>(
+          ctx_,
+          ct,
           [&](auto done)
           {
             sock_.async_send_to(
-                asio::buffer(buf.data(), buf.size()), dst,
-                [done](std::error_code ec, std::size_t bytes) mutable
+                asio::buffer(buf.data(), buf.size()),
+                dst,
+                [done = std::move(done)](
+                    std::error_code ec,
+                    std::size_t bytes) mutable
                 {
                   done(ec, bytes);
                 });
-          }};
-
-      co_return sent;
+          });
     }
 
     vix::async::core::task<udp_datagram> async_recv_from(
@@ -78,19 +116,21 @@ namespace vix::async::net
     {
       udp::endpoint src;
 
-      auto received = co_await detail::asio_awaitable<
-          std::function<void(std::function<void(std::error_code, std::size_t)>)>,
-          std::size_t>{
-          &ctx_, ct,
+      const auto received = co_await detail::co_asio_value<std::size_t>(
+          ctx_,
+          ct,
           [&](auto done)
           {
             sock_.async_receive_from(
-                asio::buffer(buf.data(), buf.size()), src,
-                [done](std::error_code ec, std::size_t bytes) mutable
+                asio::buffer(buf.data(), buf.size()),
+                src,
+                [done = std::move(done)](
+                    std::error_code ec,
+                    std::size_t bytes) mutable
                 {
                   done(ec, bytes);
                 });
-          }};
+          });
 
       udp_datagram d;
       d.from.host = src.address().to_string();

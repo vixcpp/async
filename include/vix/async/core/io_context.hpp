@@ -100,7 +100,9 @@ namespace vix::async::core
     }
 
     /**
-     * @brief Post a callable task to the scheduler.
+     * @brief Post a generic callable task to the scheduler.
+     *
+     * This uses the scheduler generic path and is intended for ordinary callbacks.
      *
      * @tparam Fn Callable type.
      * @param fn Task to execute.
@@ -112,13 +114,23 @@ namespace vix::async::core
     }
 
     /**
-     * @brief Post a coroutine handle to the scheduler.
+     * @brief Post a coroutine handle to the scheduler fast path.
      *
      * @param h Coroutine handle to resume.
      */
-    void post(std::coroutine_handle<> h)
+    void post(std::coroutine_handle<> h) noexcept
     {
-      sched_.post(h);
+      sched_.post_handle(h);
+    }
+
+    /**
+     * @brief Explicit fast-path API for coroutine resumption.
+     *
+     * @param h Coroutine handle to resume.
+     */
+    void post_handle(std::coroutine_handle<> h) noexcept
+    {
+      sched_.post_handle(h);
     }
 
     /**
@@ -134,7 +146,7 @@ namespace vix::async::core
     /**
      * @brief Stop the scheduler.
      *
-     * Causes run() to exit.
+     * Causes run() to exit after draining pending work.
      */
     void stop() noexcept
     {

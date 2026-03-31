@@ -14,6 +14,12 @@
 #include <vix/async/core/thread_pool.hpp>
 #include <vix/async/core/io_context.hpp>
 
+#include <coroutine>
+#include <functional>
+#include <mutex>
+#include <thread>
+#include <utility>
+
 namespace vix::async::core
 {
 
@@ -29,8 +35,11 @@ namespace vix::async::core
 
     for (std::size_t i = 0; i < threads; ++i)
     {
-      workers_.emplace_back([this]()
-                            { worker_loop(); });
+      workers_.emplace_back(
+          [this]()
+          {
+            worker_loop();
+          });
     }
   }
 
@@ -75,6 +84,7 @@ namespace vix::async::core
       std::lock_guard<std::mutex> lock(m_);
       stop_ = true;
     }
+
     cv_.notify_all();
 
     const std::thread::id self_id = std::this_thread::get_id();
@@ -121,7 +131,7 @@ namespace vix::async::core
         return;
       }
 
-      q_.push_back(std::move(fn));
+      q_.emplace_back(std::move(fn));
     }
 
     cv_.notify_one();
@@ -135,8 +145,12 @@ namespace vix::async::core
 
       {
         std::unique_lock<std::mutex> lock(m_);
-        cv_.wait(lock, [&]()
-                 { return stop_ || !q_.empty(); });
+        cv_.wait(
+            lock,
+            [this]()
+            {
+              return stop_ || !q_.empty();
+            });
 
         if (!q_.empty())
         {
@@ -149,22 +163,24 @@ namespace vix::async::core
         }
       }
 
-      if (fn)
+      if (!fn)
       {
-        try
-        {
-          fn();
-        }
-        catch (...)
-        {
-        }
+        continue;
+      }
+
+      try
+      {
+        fn();
+      }
+      catch (...)
+      {
       }
     }
   }
 
   void thread_pool::ctx_post(std::coroutine_handle<> h)
   {
-    ctx_.post(h);
+    ctx_.post_handle(h);
   }
 
 } // namespace vix::async::core

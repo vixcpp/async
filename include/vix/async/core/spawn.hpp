@@ -17,6 +17,7 @@
 #define VIX_ASYNC_SPAWN_HPP
 
 #include <coroutine>
+#include <utility>
 
 #include <vix/async/core/io_context.hpp>
 #include <vix/async/core/task.hpp>
@@ -33,7 +34,7 @@ namespace vix::async::core
      * - resumes when posted to the scheduler
      * - destroys itself at final suspension
      *
-     * It is intentionally move-only and designed to be "fire-and-forget".
+     * It is intentionally move-only and designed to be fire-and-forget.
      */
     struct detached_task
     {
@@ -43,7 +44,7 @@ namespace vix::async::core
        * The coroutine:
        * - returns a detached_task that carries its coroutine handle
        * - starts suspended so the caller can schedule it explicitly
-       * - self-destroys on final suspend (no external join/await)
+       * - self-destroys on final suspend
        * - swallows exceptions to avoid terminating the runtime
        */
       struct promise_type
@@ -55,7 +56,8 @@ namespace vix::async::core
          */
         detached_task get_return_object() noexcept
         {
-          return detached_task{std::coroutine_handle<promise_type>::from_promise(*this)};
+          return detached_task{
+              std::coroutine_handle<promise_type>::from_promise(*this)};
         }
 
         /**
@@ -65,7 +67,10 @@ namespace vix::async::core
          *
          * @return std::suspend_always
          */
-        std::suspend_always initial_suspend() noexcept { return {}; }
+        std::suspend_always initial_suspend() noexcept
+        {
+          return {};
+        }
 
         /**
          * @brief Final awaiter that destroys the coroutine frame.
@@ -76,8 +81,13 @@ namespace vix::async::core
         {
           /**
            * @brief Always suspend at final suspend to run await_suspend.
+           *
+           * @return false
            */
-          bool await_ready() noexcept { return false; }
+          bool await_ready() noexcept
+          {
+            return false;
+          }
 
           /**
            * @brief Destroy the coroutine frame.
@@ -100,7 +110,10 @@ namespace vix::async::core
          *
          * @return final_awaiter
          */
-        final_awaiter final_suspend() noexcept { return {}; }
+        final_awaiter final_suspend() noexcept
+        {
+          return {};
+        }
 
         /**
          * @brief Return void.
@@ -112,13 +125,10 @@ namespace vix::async::core
          *
          * Detached tasks cannot propagate exceptions to a caller. This hook
          * intentionally swallows exceptions to keep the runtime alive.
-         *
-         * @note Later this can be connected to logging or error reporting.
          */
         void unhandled_exception() noexcept
         {
-          // Detached: swallow exceptions to keep runtime alive.
-          // Later: hook into logger / error reporting.
+          // Detached tasks intentionally swallow exceptions.
         }
       };
 
@@ -132,14 +142,21 @@ namespace vix::async::core
        *
        * @param hh Coroutine handle.
        */
-      explicit detached_task(std::coroutine_handle<promise_type> hh) noexcept : h(hh) {}
+      explicit detached_task(std::coroutine_handle<promise_type> hh) noexcept
+          : h(hh)
+      {
+      }
 
       /**
        * @brief Move construct.
        *
        * @param o Source task.
        */
-      detached_task(detached_task &&o) noexcept : h(o.h) { o.h = {}; }
+      detached_task(detached_task &&o) noexcept
+          : h(o.h)
+      {
+        o.h = {};
+      }
 
       /**
        * @brief Move assign.
@@ -204,7 +221,7 @@ namespace vix::async::core
   inline void spawn_detached(io_context &ctx, task<void> t)
   {
     auto dt = detail::make_detached(std::move(t));
-    ctx.post(dt.h);
+    ctx.post_handle(dt.h);
   }
 
 } // namespace vix::async::core

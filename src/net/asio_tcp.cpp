@@ -17,14 +17,47 @@
 #include "asio_net_service.hpp"
 #include "asio_await.hpp"
 
-#include <asio/ip/tcp.hpp>
 #include <asio/connect.hpp>
-#include <asio/write.hpp>
+#include <asio/ip/tcp.hpp>
 #include <asio/read.hpp>
+#include <asio/write.hpp>
+
+#include <memory>
+#include <span>
+#include <string>
+#include <system_error>
+#include <utility>
 
 namespace vix::async::net
 {
   using tcp = asio::ip::tcp;
+
+  namespace detail
+  {
+    template <typename Starter>
+    inline vix::async::core::task<void> co_asio_void(
+        core::io_context &ctx,
+        core::cancel_token ct,
+        Starter &&starter)
+    {
+      co_await asio_awaitable<std::decay_t<Starter>, void>{
+          &ctx,
+          std::move(ct),
+          std::forward<Starter>(starter)};
+    }
+
+    template <typename T, typename Starter>
+    inline vix::async::core::task<T> co_asio_value(
+        core::io_context &ctx,
+        core::cancel_token ct,
+        Starter &&starter)
+    {
+      co_return co_await asio_awaitable<std::decay_t<Starter>, T>{
+          &ctx,
+          std::move(ct),
+          std::forward<Starter>(starter)};
+    }
+  } // namespace detail
 
   class tcp_stream_asio final : public tcp_stream
   {
@@ -35,77 +68,87 @@ namespace vix::async::net
     {
     }
 
-    vix::async::core::task<void> async_connect(const tcp_endpoint &ep, vix::async::core::cancel_token ct) override
+    vix::async::core::task<void> async_connect(
+        const tcp_endpoint &ep,
+        vix::async::core::cancel_token ct) override
     {
       tcp::resolver resolver(ctx_.net().asio_ctx());
 
-      auto results = co_await detail::asio_awaitable<
-          std::function<void(std::function<void(std::error_code, tcp::resolver::results_type)>)>,
-          tcp::resolver::results_type>{
-          &ctx_, ct,
-          [&](auto done)
-          {
-            resolver.async_resolve(
-                ep.host, std::to_string(ep.port),
-                [done](std::error_code ec, tcp::resolver::results_type r) mutable
-                {
-                  done(ec, std::move(r));
-                });
-          }};
+      auto results =
+          co_await detail::co_asio_value<tcp::resolver::results_type>(
+              ctx_,
+              ct,
+              [&](auto done)
+              {
+                resolver.async_resolve(
+                    ep.host,
+                    std::to_string(ep.port),
+                    [done = std::move(done)](
+                        std::error_code ec,
+                        tcp::resolver::results_type r) mutable
+                    {
+                      done(ec, std::move(r));
+                    });
+              });
 
-      co_await detail::asio_awaitable<
-          std::function<void(std::function<void(std::error_code)>)>,
-          void>{
-          &ctx_, ct,
+      co_await detail::co_asio_void(
+          ctx_,
+          ct,
           [&](auto done)
           {
             asio::async_connect(
-                sock_, results,
-                [done](std::error_code ec, const tcp::endpoint &) mutable
+                sock_,
+                results,
+                [done = std::move(done)](
+                    std::error_code ec,
+                    const tcp::endpoint &) mutable
                 {
                   done(ec);
                 });
-          }};
+          });
 
       co_return;
     }
 
-    vix::async::core::task<std::size_t> async_read(std::span<std::byte> buf, vix::async::core::cancel_token ct) override
+    vix::async::core::task<std::size_t> async_read(
+        std::span<std::byte> buf,
+        vix::async::core::cancel_token ct) override
     {
-      auto bytes_read = co_await detail::asio_awaitable<
-          std::function<void(std::function<void(std::error_code, std::size_t)>)>,
-          std::size_t>{
-          &ctx_, ct,
+      co_return co_await detail::co_asio_value<std::size_t>(
+          ctx_,
+          ct,
           [&](auto done)
           {
             sock_.async_read_some(
                 asio::buffer(buf.data(), buf.size()),
-                [done](std::error_code ec, std::size_t bytes) mutable
+                [done = std::move(done)](
+                    std::error_code ec,
+                    std::size_t bytes) mutable
                 {
                   done(ec, bytes);
                 });
-          }};
-
-      co_return bytes_read;
+          });
     }
 
-    vix::async::core::task<std::size_t> async_write(std::span<const std::byte> buf, vix::async::core::cancel_token ct) override
+    vix::async::core::task<std::size_t> async_write(
+        std::span<const std::byte> buf,
+        vix::async::core::cancel_token ct) override
     {
-      auto bytes_written = co_await detail::asio_awaitable<
-          std::function<void(std::function<void(std::error_code, std::size_t)>)>,
-          std::size_t>{
-          &ctx_, ct,
+      co_return co_await detail::co_asio_value<std::size_t>(
+          ctx_,
+          ct,
           [&](auto done)
           {
             asio::async_write(
-                sock_, asio::buffer(buf.data(), buf.size()),
-                [done](std::error_code ec, std::size_t bytes) mutable
+                sock_,
+                asio::buffer(buf.data(), buf.size()),
+                [done = std::move(done)](
+                    std::error_code ec,
+                    std::size_t bytes) mutable
                 {
                   done(ec, bytes);
                 });
-          }};
-
-      co_return bytes_written;
+          });
     }
 
     void close() noexcept override
@@ -119,7 +162,10 @@ namespace vix::async::net
       return sock_.is_open();
     }
 
-    tcp::socket &native() noexcept { return sock_; }
+    tcp::socket &native() noexcept
+    {
+      return sock_;
+    }
 
   private:
     core::io_context &ctx_;
@@ -142,40 +188,51 @@ namespace vix::async::net
       tcp::endpoint ep(asio::ip::make_address(bind_ep.host), bind_ep.port);
 
       std::error_code ec;
+
       acc_.open(ep.protocol(), ec);
       if (ec)
+      {
         throw std::system_error(ec);
+      }
 
       acc_.set_option(tcp::acceptor::reuse_address(true), ec);
       if (ec)
+      {
         throw std::system_error(ec);
+      }
 
       acc_.bind(ep, ec);
       if (ec)
+      {
         throw std::system_error(ec);
+      }
 
       acc_.listen(backlog, ec);
       if (ec)
+      {
         throw std::system_error(ec);
+      }
 
       co_return;
     }
 
-    vix::async::core::task<std::unique_ptr<tcp_stream>> async_accept(vix::async::core::cancel_token ct) override
+    vix::async::core::task<std::unique_ptr<tcp_stream>> async_accept(
+        vix::async::core::cancel_token ct) override
     {
       auto client = std::make_unique<tcp_stream_asio>(ctx_);
 
-      co_await detail::asio_awaitable<
-          std::function<void(std::function<void(std::error_code)>)>,
-          void>{
-          &ctx_, ct,
+      co_await detail::co_asio_void(
+          ctx_,
+          ct,
           [&](auto done)
           {
             acc_.async_accept(
                 client->native(),
-                [done](std::error_code ec) mutable
-                { done(ec); });
-          }};
+                [done = std::move(done)](std::error_code ec) mutable
+                {
+                  done(ec);
+                });
+          });
 
       co_return std::unique_ptr<tcp_stream>(client.release());
     }

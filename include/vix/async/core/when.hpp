@@ -26,8 +26,8 @@
 #include <utility>
 #include <variant>
 
-#include <vix/async/core/task.hpp>
 #include <vix/async/core/scheduler.hpp>
+#include <vix/async/core/task.hpp>
 
 namespace vix::async::core
 {
@@ -96,7 +96,7 @@ namespace vix::async::core
      *
      * @tparam T Slot logical type.
      * @param slot Destination slot.
-     * @param v Value to store (moved).
+     * @param v Value to store moved.
      */
     template <typename T>
     inline void store_into(stored_t<T> &slot, std::decay_t<T> &&v)
@@ -119,7 +119,7 @@ namespace vix::async::core
      *
      * @tparam T Slot logical type.
      * @param slot Source slot.
-     * @return Value (moved).
+     * @return Value moved.
      */
     template <typename T>
     inline std::decay_t<T> materialize_one(stored_t<T> &slot)
@@ -148,7 +148,9 @@ namespace vix::async::core
      * @return Output tuple with values moved out.
      */
     template <typename... Ts, std::size_t... Is>
-    inline auto materialize_tuple_impl(std::tuple<stored_t<Ts>...> raw, std::index_sequence<Is...>)
+    inline auto materialize_tuple_impl(
+        std::tuple<stored_t<Ts>...> raw,
+        std::index_sequence<Is...>)
     {
       using Out = std::tuple<std::conditional_t<std::is_void_v<Ts>, std::monostate, Ts>...>;
       return Out(materialize_one<Ts>(std::get<Is>(raw))...);
@@ -164,7 +166,9 @@ namespace vix::async::core
     template <typename... Ts>
     inline auto materialize_tuple(std::tuple<stored_t<Ts>...> raw)
     {
-      return materialize_tuple_impl<Ts...>(std::move(raw), std::index_sequence_for<Ts...>{});
+      return materialize_tuple_impl<Ts...>(
+          std::move(raw),
+          std::index_sequence_for<Ts...>{});
     }
 
     /**
@@ -173,11 +177,8 @@ namespace vix::async::core
      * Tracks:
      * - remaining: number of tasks not finished yet
      * - cont: awaiting coroutine to resume when all finish
-     * - first_ex: first captured exception (if any)
+     * - first_ex: first captured exception if any
      * - results: stored results slots
-     *
-     * The scheduler pointer is used to post the continuation back to the
-     * scheduler thread.
      *
      * @tparam Ts Task result types.
      */
@@ -223,15 +224,21 @@ namespace vix::async::core
       catch (...)
       {
         if (!st->first_ex)
+        {
           st->first_ex = std::current_exception();
+        }
       }
 
       if (st->remaining.fetch_sub(1, std::memory_order_acq_rel) == 1)
       {
         if (st->sched)
-          st->sched->post(st->cont);
+        {
+          st->sched->post_handle(st->cont);
+        }
         else if (st->cont)
+        {
           st->cont.resume();
+        }
       }
 
       co_return;
@@ -255,7 +262,10 @@ namespace vix::async::core
       /**
        * @brief Always suspend to start tasks concurrently.
        */
-      bool await_ready() const noexcept { return false; }
+      bool await_ready() const noexcept
+      {
+        return false;
+      }
 
       /**
        * @brief Start all runners and suspend the awaiting coroutine.
@@ -271,7 +281,7 @@ namespace vix::async::core
       }
 
       /**
-       * @brief Resume and return aggregated results (or rethrow first exception).
+       * @brief Resume and return aggregated results or rethrow first exception.
        *
        * @return Tuple of results with void mapped to std::monostate.
        * @throws First exception captured by any task.
@@ -279,7 +289,10 @@ namespace vix::async::core
       auto await_resume()
       {
         if (st->first_ex)
+        {
           std::rethrow_exception(st->first_ex);
+        }
+
         return materialize_tuple<Ts...>(std::move(st->results));
       }
 
@@ -314,9 +327,9 @@ namespace vix::async::core
      * Tracks:
      * - done: first completion flag
      * - cont: awaiting coroutine to resume on first completion
-     * - ex: first captured exception (if any)
+     * - ex: first captured exception if any
      * - index: index of the first task that completed
-     * - results: stored results slots (only guaranteed to have the winner populated)
+     * - results: stored results slots
      *
      * @tparam Ts Task result types.
      */
@@ -334,7 +347,7 @@ namespace vix::async::core
     /**
      * @brief Runner coroutine for one task in when_any.
      *
-     * Awaits a task, stores its result (or captures exception),
+     * Awaits a task, stores its result or captures exception,
      * and if this runner wins the race, resumes the awaiting coroutine.
      *
      * @tparam I Index of the task in the pack.
@@ -363,17 +376,24 @@ namespace vix::async::core
       catch (...)
       {
         if (!st->ex)
+        {
           st->ex = std::current_exception();
+        }
       }
 
       bool expected = false;
       if (st->done.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
       {
         st->index = I;
+
         if (st->sched)
-          st->sched->post(st->cont);
+        {
+          st->sched->post_handle(st->cont);
+        }
         else if (st->cont)
+        {
           st->cont.resume();
+        }
       }
 
       co_return;
@@ -383,7 +403,7 @@ namespace vix::async::core
      * @brief Awaitable implementing when_any scheduling and first-completion semantics.
      *
      * Starts all tasks as detached runners, then resumes the awaiting coroutine
-     * once the first task completes (success or exception).
+     * once the first task completes success or exception.
      *
      * @tparam Ts Task result types.
      */
@@ -397,7 +417,10 @@ namespace vix::async::core
       /**
        * @brief Always suspend to start tasks concurrently.
        */
-      bool await_ready() const noexcept { return false; }
+      bool await_ready() const noexcept
+      {
+        return false;
+      }
 
       /**
        * @brief Start all runners and suspend the awaiting coroutine.
@@ -415,16 +438,15 @@ namespace vix::async::core
       /**
        * @brief Resume and return the winning index and raw stored slots.
        *
-       * The returned tuple contains stored_t<T> slots. Use materialize_tuple()
-       * to map void to std::monostate and move values out.
-       *
        * @return Pair {index, tuple<stored slots>}.
-       * @throws First exception captured (if winner failed and ex is set).
+       * @throws First exception captured if winner failed and ex is set.
        */
       std::pair<std::size_t, std::tuple<stored_t<Ts>...>> await_resume()
       {
         if (st->ex)
+        {
           std::rethrow_exception(st->ex);
+        }
 
         return {st->index, std::move(st->results)};
       }
@@ -468,7 +490,7 @@ namespace vix::async::core
    * @tparam Ts Task result types.
    * @param sched Scheduler used to start and resume continuations.
    * @param ts Tasks to run.
-   * @return task<std::tuple<...>> aggregated results (void mapped to monostate).
+   * @return task<std::tuple<...>> aggregated results with void mapped to monostate.
    */
   template <typename... Ts>
   task<std::tuple<std::conditional_t<std::is_void_v<Ts>, std::monostate, Ts>...>>
@@ -485,14 +507,14 @@ namespace vix::async::core
   }
 
   /**
-   * @brief Await completion of any task (first winner).
+   * @brief Await completion of any task first winner.
    *
    * Runs all provided tasks concurrently and completes when the first task
-   * finishes (success or exception). Returns:
+   * finishes success or exception. Returns:
    * - index: the winning task index
    * - tuple: aggregated results with void mapped to std::monostate
    *
-   * If the winning task throws (or the first captured exception is recorded),
+   * If the winning task throws or the first captured exception is recorded,
    * the exception is rethrown when resuming.
    *
    * @tparam Ts Task result types.

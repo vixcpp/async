@@ -16,12 +16,12 @@
 #ifndef VIX_ASYNC_TASK_HPP
 #define VIX_ASYNC_TASK_HPP
 
+#include <cassert>
 #include <coroutine>
 #include <exception>
 #include <optional>
 #include <type_traits>
 #include <utility>
-#include <cassert>
 
 #include <vix/async/core/scheduler.hpp>
 
@@ -81,7 +81,10 @@ namespace vix::async::core
        *
        * @return std::suspend_always
        */
-      std::suspend_always initial_suspend() noexcept { return {}; }
+      std::suspend_always initial_suspend() noexcept
+      {
+        return {};
+      }
 
       /**
        * @brief Final awaiter responsible for resuming continuation or self-destruction.
@@ -91,7 +94,10 @@ namespace vix::async::core
         /**
          * @brief Always suspend to control continuation transfer.
          */
-        bool await_ready() noexcept { return false; }
+        bool await_ready() noexcept
+        {
+          return false;
+        }
 
         /**
          * @brief Resume the continuation or destroy if detached.
@@ -110,10 +116,14 @@ namespace vix::async::core
           auto &p = h.promise();
 
           if (p.continuation)
+          {
             return p.continuation;
+          }
 
           if (p.detached)
+          {
             h.destroy();
+          }
 
           return std::noop_coroutine();
         }
@@ -127,7 +137,10 @@ namespace vix::async::core
       /**
        * @brief Use the final awaiter described above.
        */
-      final_awaiter final_suspend() noexcept { return {}; }
+      final_awaiter final_suspend() noexcept
+      {
+        return {};
+      }
 
       /**
        * @brief Capture unhandled exceptions.
@@ -148,8 +161,9 @@ namespace vix::async::core
     template <typename T>
     struct promise_value : promise_common
     {
-      static_assert(!std::is_reference_v<T>,
-                    "task<T> does not support reference T (use task<std::reference_wrapper<T>>).");
+      static_assert(
+          !std::is_reference_v<T>,
+          "task<T> does not support reference T (use task<std::reference_wrapper<T>>).");
 
       /**
        * @brief Create the task return object.
@@ -237,7 +251,7 @@ namespace vix::async::core
       /**
        * @brief Resume and extract the result (or rethrow exception).
        *
-       * @return For task<T>, returns T (moved). For task<void>, returns void.
+       * @return For task<T>, returns T moved. For task<void>, returns void.
        * @throws Any exception captured by the task coroutine.
        */
       decltype(auto) await_resume()
@@ -245,7 +259,9 @@ namespace vix::async::core
         auto &p = h.promise();
 
         if (p.exception)
+        {
           std::rethrow_exception(p.exception);
+        }
 
         if constexpr (std::is_same_v<Promise, promise_value<void>>)
         {
@@ -300,7 +316,10 @@ namespace vix::async::core
      *
      * @param other Source task.
      */
-    task(task &&other) noexcept : h_(other.h_) { other.h_ = {}; }
+    task(task &&other) noexcept : h_(other.h_)
+    {
+      other.h_ = {};
+    }
 
     /**
      * @brief Move assign.
@@ -332,54 +351,86 @@ namespace vix::async::core
     task &operator=(const task &) = delete;
 
     /**
-     * @brief Destroy the task and its coroutine frame (unless detached).
+     * @brief Destroy the task and its coroutine frame unless detached.
      */
-    ~task() { destroy(); }
+    ~task()
+    {
+      destroy();
+    }
 
     /**
      * @brief Check whether this task holds a coroutine handle.
      *
      * @return true if valid, false otherwise.
      */
-    bool valid() const noexcept { return static_cast<bool>(h_); }
+    bool valid() const noexcept
+    {
+      return static_cast<bool>(h_);
+    }
 
     /**
      * @brief Bool conversion.
      */
-    explicit operator bool() const noexcept { return valid(); }
+    explicit operator bool() const noexcept
+    {
+      return valid();
+    }
 
     /**
      * @brief co_await support (lvalue).
      */
-    auto operator co_await() & noexcept { return detail::task_awaiter<promise_type>{h_}; }
+    auto operator co_await() & noexcept
+    {
+      return detail::task_awaiter<promise_type>{h_};
+    }
 
     /**
      * @brief co_await support (rvalue).
      */
-    auto operator co_await() && noexcept { return detail::task_awaiter<promise_type>{h_}; }
+    auto operator co_await() && noexcept
+    {
+      return detail::task_awaiter<promise_type>{h_};
+    }
 
     /**
      * @brief Access the underlying coroutine handle.
      *
      * @return Coroutine handle.
      */
-    handle_type handle() const noexcept { return h_; }
+    handle_type handle() const noexcept
+    {
+      return h_;
+    }
+
+    /**
+     * @brief Release ownership of the coroutine handle.
+     *
+     * @return Released handle.
+     */
+    handle_type release() noexcept
+    {
+      handle_type tmp = h_;
+      h_ = {};
+      return tmp;
+    }
 
     /**
      * @brief Start the task on a scheduler and detach it.
      *
-     * Marks the coroutine as detached and posts it onto the scheduler.
-     * After this call, the task releases ownership (becomes empty).
+     * Marks the coroutine as detached and posts it onto the scheduler fast path.
+     * After this call, the task releases ownership and becomes empty.
      *
      * @param sched Scheduler used to run the task.
      */
     void start(scheduler &sched) && noexcept
     {
       if (!h_)
+      {
         return;
+      }
 
       h_.promise().detached = true;
-      sched.post(std::coroutine_handle<>(h_));
+      sched.post_handle(std::coroutine_handle<>(h_));
       h_ = {};
     }
 
@@ -411,7 +462,14 @@ namespace vix::async::core
   class task<void>
   {
   public:
+    /**
+     * @brief Promise type used by the coroutine.
+     */
     using promise_type = detail::promise_value<void>;
+
+    /**
+     * @brief Coroutine handle type.
+     */
     using handle_type = std::coroutine_handle<promise_type>;
 
     /**
@@ -431,7 +489,10 @@ namespace vix::async::core
      *
      * @param other Source task.
      */
-    task(task &&other) noexcept : h_(other.h_) { other.h_ = {}; }
+    task(task &&other) noexcept : h_(other.h_)
+    {
+      other.h_ = {};
+    }
 
     /**
      * @brief Move assign.
@@ -461,51 +522,85 @@ namespace vix::async::core
     task &operator=(const task &) = delete;
 
     /**
-     * @brief Destroy the task and its coroutine frame (unless detached).
+     * @brief Destroy the task and its coroutine frame unless detached.
      */
-    ~task() { destroy(); }
+    ~task()
+    {
+      destroy();
+    }
 
     /**
      * @brief Check whether this task holds a coroutine handle.
      *
      * @return true if valid, false otherwise.
      */
-    bool valid() const noexcept { return static_cast<bool>(h_); }
+    bool valid() const noexcept
+    {
+      return static_cast<bool>(h_);
+    }
 
     /**
      * @brief Bool conversion.
      */
-    explicit operator bool() const noexcept { return valid(); }
+    explicit operator bool() const noexcept
+    {
+      return valid();
+    }
 
     /**
      * @brief co_await support (lvalue).
      */
-    auto operator co_await() & noexcept { return detail::task_awaiter<promise_type>{h_}; }
+    auto operator co_await() & noexcept
+    {
+      return detail::task_awaiter<promise_type>{h_};
+    }
 
     /**
      * @brief co_await support (rvalue).
      */
-    auto operator co_await() && noexcept { return detail::task_awaiter<promise_type>{h_}; }
+    auto operator co_await() && noexcept
+    {
+      return detail::task_awaiter<promise_type>{h_};
+    }
 
     /**
      * @brief Access the underlying coroutine handle.
      *
      * @return Coroutine handle.
      */
-    handle_type handle() const noexcept { return h_; }
+    handle_type handle() const noexcept
+    {
+      return h_;
+    }
+
+    /**
+     * @brief Release ownership of the coroutine handle.
+     *
+     * @return Released handle.
+     */
+    handle_type release() noexcept
+    {
+      handle_type tmp = h_;
+      h_ = {};
+      return tmp;
+    }
 
     /**
      * @brief Start the task on a scheduler and detach it.
+     *
+     * Marks the coroutine as detached and posts it onto the scheduler fast path.
      *
      * @param sched Scheduler used to run the task.
      */
     void start(scheduler &sched) && noexcept
     {
       if (!h_)
+      {
         return;
+      }
 
       h_.promise().detached = true;
-      sched.post(std::coroutine_handle<>(h_));
+      sched.post_handle(std::coroutine_handle<>(h_));
       h_ = {};
     }
 

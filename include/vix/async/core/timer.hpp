@@ -17,19 +17,19 @@
 #define VIX_ASYNC_TIMER_HPP
 
 #include <chrono>
+#include <condition_variable>
 #include <coroutine>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <mutex>
-#include <condition_variable>
-#include <map>
-#include <utility>
 #include <set>
 #include <thread>
+#include <utility>
 
-#include <vix/async/core/task.hpp>
 #include <vix/async/core/cancel.hpp>
 #include <vix/async/core/error.hpp>
+#include <vix/async/core/task.hpp>
 
 namespace vix::async::core
 {
@@ -160,12 +160,18 @@ namespace vix::async::core
        *
        * @param f Callable to store.
        */
-      explicit job_impl(Fn &&f) : fn(std::forward<Fn>(f)) {}
+      explicit job_impl(Fn &&f)
+          : fn(std::forward<Fn>(f))
+      {
+      }
 
       /**
        * @brief Run the stored callable.
        */
-      void run() override { fn(); }
+      void run() override
+      {
+        fn();
+      }
     };
 
     /**
@@ -178,7 +184,8 @@ namespace vix::async::core
     template <typename Fn>
     static std::unique_ptr<job> make_job(Fn &&fn)
     {
-      return std::unique_ptr<job>(new job_impl<Fn>(std::forward<Fn>(fn)));
+      return std::unique_ptr<job>(
+          new job_impl<Fn>(std::forward<Fn>(fn)));
     }
 
     /**
@@ -196,11 +203,22 @@ namespace vix::async::core
     void timer_loop();
 
     /**
-     * @brief Post a function onto the io_context scheduler.
+     * @brief Post a generic function onto the io_context scheduler.
+     *
+     * Used for ordinary callback-style timers.
      *
      * @param fn Function to execute on the scheduler thread.
      */
     void ctx_post(std::function<void()> fn);
+
+    /**
+     * @brief Post a coroutine handle onto the io_context fast coroutine path.
+     *
+     * Used for coroutine wakeups such as sleep_for().
+     *
+     * @param h Coroutine handle to resume.
+     */
+    void ctx_post_handle(std::coroutine_handle<> h);
 
   private:
     /**
@@ -257,7 +275,10 @@ namespace vix::async::core
       bool operator()(const entry &a, const entry &b) const noexcept
       {
         if (a.when != b.when)
+        {
           return a.when < b.when;
+        }
+
         return a.id < b.id;
       }
     };

@@ -26,9 +26,9 @@
 #include <utility>
 #include <vector>
 
-#include <vix/async/core/task.hpp>
 #include <vix/async/core/cancel.hpp>
 #include <vix/async/core/error.hpp>
+#include <vix/async/core/task.hpp>
 
 namespace vix::async::core
 {
@@ -63,7 +63,7 @@ namespace vix::async::core
     /**
      * @brief Destroy the signal_set.
      *
-     * Stops the internal worker (if started) and releases resources.
+     * Stops the internal worker if started and releases resources.
      */
     ~signal_set();
 
@@ -82,7 +82,7 @@ namespace vix::async::core
      *
      * If the watcher is not started yet, it may be started lazily.
      *
-     * @param sig Signal number (e.g. SIGINT).
+     * @param sig Signal number such as SIGINT.
      */
     void add(int sig);
 
@@ -109,7 +109,7 @@ namespace vix::async::core
      * @brief Register a callback invoked when a signal is received.
      *
      * The callback is executed via the io_context posting mechanism
-     * (so it runs on the scheduler thread), not on the worker thread.
+     * so it runs on the scheduler thread, not on the worker thread.
      *
      * @param fn Callback taking the signal number.
      */
@@ -118,7 +118,7 @@ namespace vix::async::core
     /**
      * @brief Stop signal watching and wake any waiter.
      *
-     * This requests shutdown of the internal worker loop (if running).
+     * This requests shutdown of the internal worker loop if running.
      */
     void stop() noexcept;
 
@@ -132,16 +132,23 @@ namespace vix::async::core
      * @brief Worker thread loop.
      *
      * Captures signals, pushes them into the pending queue, and
-     * triggers waiter/callback dispatch onto the io_context.
+     * triggers waiter or callback dispatch onto the io_context.
      */
     void worker_loop();
 
     /**
-     * @brief Post a function onto the io_context scheduler.
+     * @brief Post a generic callback onto the io_context scheduler.
      *
      * @param fn Function to execute on the scheduler thread.
      */
     void ctx_post(std::function<void()> fn);
+
+    /**
+     * @brief Post a coroutine handle onto the io_context fast coroutine path.
+     *
+     * @param h Coroutine handle to resume.
+     */
+    void ctx_post_handle(std::coroutine_handle<> h);
 
   private:
     /**
@@ -185,7 +192,7 @@ namespace vix::async::core
     std::thread worker_;
 
     /**
-     * @brief Coroutine handle waiting for a signal (single waiter model).
+     * @brief Coroutine handle waiting for a signal single waiter model.
      */
     std::coroutine_handle<> waiter_{};
 

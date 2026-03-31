@@ -14,17 +14,22 @@
 #include <vix/async/core/timer.hpp>
 #include <vix/async/core/io_context.hpp>
 
+#include <coroutine>
 #include <functional>
 #include <memory>
 #include <system_error>
 #include <thread>
+#include <utility>
 
 namespace vix::async::core
 {
   timer::timer(io_context &ctx)
       : ctx_(ctx),
-        worker_([this]()
-                { timer_loop(); })
+        worker_(
+            [this]()
+            {
+              timer_loop();
+            })
   {
   }
 
@@ -68,6 +73,7 @@ namespace vix::async::core
       stop_ = true;
       q_.clear();
     }
+
     cv_.notify_all();
   }
 
@@ -80,6 +86,7 @@ namespace vix::async::core
 
     {
       std::lock_guard<std::mutex> lock(m_);
+
       if (stop_)
       {
         return;
@@ -101,21 +108,24 @@ namespace vix::async::core
   {
     struct awaitable
     {
-      timer *self;
-      duration d;
-      cancel_token ct;
+      timer *self{};
+      duration d{};
+      cancel_token ct{};
 
-      bool await_ready() const noexcept { return d.count() == 0; }
+      bool await_ready() const noexcept
+      {
+        return d.count() == 0;
+      }
 
       void await_suspend(std::coroutine_handle<> h)
       {
         self->after(
             d,
-            [h]() mutable
+            [self = self, h]() mutable
             {
-              if (h)
+              if (self && h)
               {
-                h.resume();
+                self->ctx_post_handle(h);
               }
             },
             ct);
@@ -138,6 +148,11 @@ namespace vix::async::core
     ctx_.post(std::move(fn));
   }
 
+  void timer::ctx_post_handle(std::coroutine_handle<> h)
+  {
+    ctx_.post_handle(h);
+  }
+
   void timer::timer_loop()
   {
     while (true)
@@ -148,8 +163,12 @@ namespace vix::async::core
       {
         std::unique_lock<std::mutex> lock(m_);
 
-        cv_.wait(lock, [&]()
-                 { return stop_ || !q_.empty(); });
+        cv_.wait(
+            lock,
+            [this]()
+            {
+              return stop_ || !q_.empty();
+            });
 
         if (stop_)
         {
@@ -177,6 +196,7 @@ namespace vix::async::core
         }
 
         std::unique_lock<std::mutex> lock(m_);
+
         if (stop_)
         {
           return;
@@ -187,7 +207,11 @@ namespace vix::async::core
           auto it = q_.begin();
           if (it->when < next.when)
           {
-            q_.insert(entry{next.when, next.id, next.ct, std::move(next.j)});
+            q_.insert(entry{
+                next.when,
+                next.id,
+                next.ct,
+                std::move(next.j)});
 
             next = entry{it->when, it->id, it->ct, nullptr};
             next.j = std::move(const_cast<entry &>(*it).j);
@@ -196,8 +220,13 @@ namespace vix::async::core
           }
         }
 
-        cv_.wait_until(lock, next.when, [&]()
-                       { return stop_; });
+        cv_.wait_until(
+            lock,
+            next.when,
+            [this]()
+            {
+              return stop_;
+            });
 
         if (stop_)
         {
@@ -213,12 +242,15 @@ namespace vix::async::core
       if (next.j)
       {
         std::shared_ptr<job> j(next.j.release());
-        ctx_post([j = std::move(j)]() mutable
-                 {
-                   if (j)
-                   {
-                     j->run();
-                   } });
+
+        ctx_post(
+            [j = std::move(j)]() mutable
+            {
+              if (j)
+              {
+                j->run();
+              }
+            });
       }
     }
   }

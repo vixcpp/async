@@ -19,6 +19,7 @@
 #include <cstdint>
 #include <string>
 #include <system_error>
+#include <type_traits>
 
 namespace vix::async::core
 {
@@ -114,7 +115,7 @@ namespace vix::async::core
      *
      * @return Category name ("async").
      */
-    const char *name() const noexcept override
+    [[nodiscard]] const char *name() const noexcept override
     {
       return "async";
     }
@@ -125,7 +126,7 @@ namespace vix::async::core
      * @param c Integer value of the error code.
      * @return Human-readable error message.
      */
-    std::string message(int c) const override
+    [[nodiscard]] std::string message(int c) const override
     {
       switch (static_cast<errc>(c))
       {
@@ -162,7 +163,7 @@ namespace vix::async::core
    *
    * @return Reference to the async error category.
    */
-  inline const std::error_category &category() noexcept
+  [[nodiscard]] inline const std::error_category &category() noexcept
   {
     static error_category cat;
     return cat;
@@ -174,7 +175,7 @@ namespace vix::async::core
    * @param e Async error code.
    * @return Corresponding std::error_code.
    */
-  inline std::error_code make_error_code(errc e) noexcept
+  [[nodiscard]] inline std::error_code make_error_code(errc e) noexcept
   {
     return {static_cast<int>(e), category()};
   }

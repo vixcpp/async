@@ -16,11 +16,13 @@
 #ifndef VIX_ASYNC_SCHEDULER_HPP
 #define VIX_ASYNC_SCHEDULER_HPP
 
+#include <atomic>
+#include <condition_variable>
 #include <coroutine>
 #include <cstdint>
 #include <deque>
+#include <functional>
 #include <mutex>
-#include <condition_variable>
 #include <utility>
 
 namespace vix::async::core
@@ -28,8 +30,14 @@ namespace vix::async::core
   /**
    * @brief Minimal single-thread scheduler for tasks and coroutine resumption.
    *
-   * scheduler provides a thread-safe queue of jobs and an event loop (run())
+   * scheduler provides a thread-safe queue of work and an event loop (run())
    * that executes enqueued work on the calling thread.
+   *
+   * Optimized design:
+   * - coroutine handles use a dedicated fast path queue
+   * - generic callables use a secondary queue
+   * - no polymorphic type-erasure with manual new/delete
+   * - run() prioritizes coroutine resumption to reduce async overhead
    *
    * Supported work items:
    * - Generic callables posted via post(Fn)
@@ -58,9 +66,10 @@ namespace vix::async::core
     scheduler &operator=(const scheduler &) = delete;
 
     /**
-     * @brief Post a callable to be executed by the scheduler loop.
+     * @brief Post a generic callable to be executed by the scheduler loop.
      *
-     * The callable is enqueued and one waiting thread (run()) is notified.
+     * This is the slower generic path intended for ordinary callbacks.
+     * Coroutine resumptions should prefer post(std::coroutine_handle<>).
      *
      * @tparam Fn Callable type.
      * @param fn Callable to enqueue.
@@ -70,23 +79,43 @@ namespace vix::async::core
     {
       {
         std::lock_guard<std::mutex> lock(m_);
-        q_.emplace_back(job{std::forward<Fn>(fn)});
+        fn_q_.emplace_back(std::forward<Fn>(fn));
       }
+
       cv_.notify_one();
     }
 
     /**
      * @brief Post a coroutine continuation to be resumed by the scheduler.
      *
-     * The handle is wrapped into a small job that resumes the coroutine
-     * when executed by run().
+     * This is the fast path for coroutine scheduling. The handle is stored
+     * directly without wrapping it into a generic callable.
      *
      * @param h Coroutine handle to resume.
      */
-    void post(std::coroutine_handle<> h)
+    void post(std::coroutine_handle<> h) noexcept
     {
-      post([h]() mutable
-           { if (h) h.resume(); });
+      if (!h)
+      {
+        return;
+      }
+
+      {
+        std::lock_guard<std::mutex> lock(m_);
+        handle_q_.emplace_back(h);
+      }
+
+      cv_.notify_one();
+    }
+
+    /**
+     * @brief Explicit fast-path alias for coroutine continuation posting.
+     *
+     * @param h Coroutine handle to resume.
+     */
+    void post_handle(std::coroutine_handle<> h) noexcept
+    {
+      post(h);
     }
 
     /**
@@ -127,10 +156,13 @@ namespace vix::async::core
         if (!s)
         {
           if (h)
+          {
             h.resume();
+          }
           return;
         }
-        s->post(h);
+
+        s->post_handle(h);
       }
 
       /**
@@ -144,58 +176,86 @@ namespace vix::async::core
      *
      * @return schedule_awaitable bound to this scheduler.
      */
-    schedule_awaitable schedule() noexcept { return schedule_awaitable{this}; }
+    schedule_awaitable schedule() noexcept
+    {
+      return schedule_awaitable{this};
+    }
 
     /**
      * @brief Run the scheduler event loop on the current thread.
      *
-     * This function blocks, waiting for new jobs. It executes jobs in FIFO
-     * order until stop() is requested and the queue is drained.
+     * This function blocks, waiting for new work. It executes coroutine
+     * handles first, then generic callables, until stop() is requested
+     * and both queues are drained.
      */
     void run()
     {
-      running_ = true;
+      running_.store(true, std::memory_order_release);
 
       while (true)
       {
-        job j;
+        std::coroutine_handle<> h{};
+        std::function<void()> fn{};
 
         {
           std::unique_lock<std::mutex> lock(m_);
-          cv_.wait(lock, [&]()
-                   { return stop_requested_ || !q_.empty(); });
+          cv_.wait(lock, [this]()
+                   { return stop_requested_.load(std::memory_order_acquire) ||
+                            !handle_q_.empty() ||
+                            !fn_q_.empty(); });
 
-          if (!q_.empty())
+          if (!handle_q_.empty())
           {
-            j = std::move(q_.front());
-            q_.pop_front();
+            h = handle_q_.front();
+            handle_q_.pop_front();
           }
-          else if (stop_requested_)
+          else if (!fn_q_.empty())
+          {
+            fn = std::move(fn_q_.front());
+            fn_q_.pop_front();
+          }
+          else if (stop_requested_.load(std::memory_order_acquire))
           {
             break;
           }
         }
 
-        if (j.fn)
-          j.fn();
+        if (h)
+        {
+          h.resume();
+          continue;
+        }
+
+        if (fn)
+        {
+          fn();
+        }
       }
 
-      running_ = false;
+      running_.store(false, std::memory_order_release);
     }
 
     /**
      * @brief Request the scheduler loop to stop.
      *
      * Wakes all waiters so that run() can observe the stop request.
-     * Pending jobs may still execute depending on the loop state.
+     * Pending work already queued will still be drained before exit.
      */
     void stop() noexcept
     {
-      {
-        std::lock_guard<std::mutex> lock(m_);
-        stop_requested_ = true;
-      }
+      stop_requested_.store(true, std::memory_order_release);
       cv_.notify_all();
+    }
+
+    /**
+     * @brief Reset the scheduler stop state.
+     *
+     * Useful only if the scheduler is intentionally reused after a previous stop.
+     * Must not be called while run() is active.
+     */
+    void reset() noexcept
+    {
+      stop_requested_.store(false, std::memory_order_release);
     }
 
     /**
@@ -203,210 +263,88 @@ namespace vix::async::core
      *
      * @return true if run() is active, false otherwise.
      */
-    bool is_running() const noexcept { return running_; }
+    bool is_running() const noexcept
+    {
+      return running_.load(std::memory_order_acquire);
+    }
 
     /**
-     * @brief Return the number of pending jobs currently in the queue.
+     * @brief Check whether stop was requested.
      *
-     * @return Queue size.
+     * @return true if stop() has been called, false otherwise.
+     */
+    bool stop_requested() const noexcept
+    {
+      return stop_requested_.load(std::memory_order_acquire);
+    }
+
+    /**
+     * @brief Return the number of pending coroutine handles currently in the queue.
+     *
+     * @return Handle queue size.
+     */
+    std::size_t pending_handles() const
+    {
+      std::lock_guard<std::mutex> lock(m_);
+      return handle_q_.size();
+    }
+
+    /**
+     * @brief Return the number of pending generic callables currently in the queue.
+     *
+     * @return Callable queue size.
+     */
+    std::size_t pending_functions() const
+    {
+      std::lock_guard<std::mutex> lock(m_);
+      return fn_q_.size();
+    }
+
+    /**
+     * @brief Return the total number of pending work items currently in the queues.
+     *
+     * @return Total queue size.
      */
     std::size_t pending() const
     {
       std::lock_guard<std::mutex> lock(m_);
-      return q_.size();
+      return handle_q_.size() + fn_q_.size();
     }
 
   private:
     /**
-     * @brief Type-erased job stored in the scheduler queue.
-     *
-     * job contains a small type-erased callable holder (fn_holder) that
-     * owns the posted callable and invokes it when executed.
-     */
-    struct job
-    {
-      /**
-       * @brief Default construct an empty job.
-       */
-      job() = default;
-
-      /**
-       * @brief Construct a job from a callable.
-       *
-       * @tparam Fn Callable type.
-       * @param f Callable to store.
-       */
-      template <typename Fn>
-      explicit job(Fn &&f) : fn(std::forward<Fn>(f)) {}
-
-      /**
-       * @brief Polymorphic base for type-erased callables.
-       */
-      struct fn_base
-      {
-        virtual ~fn_base() = default;
-
-        /**
-         * @brief Invoke the stored callable.
-         */
-        virtual void call() = 0;
-      };
-
-      /**
-       * @brief Concrete callable wrapper.
-       *
-       * @tparam Fn Stored callable type.
-       */
-      template <typename Fn>
-      struct fn_impl final : fn_base
-      {
-        /**
-         * @brief Stored callable.
-         */
-        Fn f;
-
-        /**
-         * @brief Construct from a callable instance.
-         *
-         * @param x Callable to store.
-         */
-        explicit fn_impl(Fn x) : f(std::move(x)) {}
-
-        /**
-         * @brief Invoke the callable.
-         */
-        void call() override { f(); }
-      };
-
-      /**
-       * @brief Owning holder for a type-erased callable.
-       *
-       * This holder manages the lifetime of the polymorphic callable and
-       * supports move-only semantics to keep job movable.
-       */
-      struct fn_holder
-      {
-        /**
-         * @brief Construct an empty holder.
-         */
-        fn_holder() = default;
-
-        /**
-         * @brief Construct a holder from a callable.
-         *
-         * The callable is stored by value after decay.
-         *
-         * @tparam Fn Callable type.
-         * @param f Callable to store.
-         */
-        template <typename Fn>
-        explicit fn_holder(Fn &&f)
-        {
-          using D = std::decay_t<Fn>;
-          ptr = new fn_impl<D>(D(std::forward<Fn>(f)));
-        }
-
-        /**
-         * @brief Move construct the holder.
-         *
-         * @param o Source holder.
-         */
-        fn_holder(fn_holder &&o) noexcept : ptr(o.ptr) { o.ptr = nullptr; }
-
-        /**
-         * @brief Move assign the holder.
-         *
-         * @param o Source holder.
-         * @return Reference to this.
-         */
-        fn_holder &operator=(fn_holder &&o) noexcept
-        {
-          if (this != &o)
-          {
-            reset();
-            ptr = o.ptr;
-            o.ptr = nullptr;
-          }
-          return *this;
-        }
-
-        /**
-         * @brief fn_holder is non-copyable.
-         */
-        fn_holder(const fn_holder &) = delete;
-
-        /**
-         * @brief fn_holder is non-copyable.
-         */
-        fn_holder &operator=(const fn_holder &) = delete;
-
-        /**
-         * @brief Destroy the holder and release any stored callable.
-         */
-        ~fn_holder() { reset(); }
-
-        /**
-         * @brief Invoke the stored callable (if any).
-         */
-        void operator()()
-        {
-          if (ptr)
-            ptr->call();
-        }
-
-        /**
-         * @brief Check whether a callable is stored.
-         *
-         * @return true if non-empty, false otherwise.
-         */
-        explicit operator bool() const noexcept { return ptr != nullptr; }
-
-        /**
-         * @brief Release the stored callable.
-         */
-        void reset() noexcept
-        {
-          delete ptr;
-          ptr = nullptr;
-        }
-
-        /**
-         * @brief Pointer to the polymorphic callable.
-         */
-        fn_base *ptr{nullptr};
-      };
-
-      /**
-       * @brief Stored callable holder.
-       */
-      fn_holder fn{};
-    };
-
-  private:
-    /**
-     * @brief Mutex protecting the job queue and stop flag.
+     * @brief Mutex protecting internal queues.
      */
     mutable std::mutex m_;
 
     /**
-     * @brief Condition variable used to wake run() when jobs arrive or stop is requested.
+     * @brief Condition variable used to wake run() when work arrives or stop is requested.
      */
     std::condition_variable cv_;
 
     /**
-     * @brief FIFO job queue.
+     * @brief FIFO queue dedicated to coroutine continuations.
+     *
+     * This is the hot path of the async runtime.
      */
-    std::deque<job> q_;
+    std::deque<std::coroutine_handle<>> handle_q_;
+
+    /**
+     * @brief FIFO queue for generic callbacks.
+     *
+     * This is the slower fallback path for ordinary callables.
+     */
+    std::deque<std::function<void()>> fn_q_;
 
     /**
      * @brief Stop request flag observed by run().
      */
-    bool stop_requested_{false};
+    std::atomic<bool> stop_requested_{false};
 
     /**
      * @brief Indicates whether run() is currently active.
      */
-    bool running_{false};
+    std::atomic<bool> running_{false};
   };
 
 } // namespace vix::async::core

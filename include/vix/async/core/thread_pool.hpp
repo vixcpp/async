@@ -143,7 +143,7 @@ namespace vix::async::core
      * @brief Submit a callable and await its result as a coroutine task.
      *
      * The callable is executed on the thread pool, then the awaiting coroutine
-     * is resumed back on the owning io_context.
+     * is resumed back on the owning io_context fast coroutine path.
      *
      * If the cancellation token is already cancelled before execution starts,
      * the coroutine resumes with a cancelled system_error.
@@ -181,7 +181,10 @@ namespace vix::async::core
          *
          * @return false to force suspension.
          */
-        bool await_ready() const noexcept { return false; }
+        bool await_ready() const noexcept
+        {
+          return false;
+        }
 
         /**
          * @brief Enqueue the callable and resume the coroutine later.
@@ -190,32 +193,34 @@ namespace vix::async::core
          */
         void await_suspend(std::coroutine_handle<> h)
         {
-          pool->enqueue([this, h]() mutable
-                        {
-            try
-            {
-              if (ct.is_cancelled())
+          pool->enqueue(
+              [this, h]() mutable
               {
-                throw std::system_error(cancelled_ec());
-              }
+                try
+                {
+                  if (ct.is_cancelled())
+                  {
+                    throw std::system_error(cancelled_ec());
+                  }
 
-              if constexpr (std::is_void_v<R>)
-              {
-                fn();
-                store.set();
-              }
-              else
-              {
-                R r = fn();
-                store.set(std::move(r));
-              }
-            }
-            catch (...)
-            {
-              ex = std::current_exception();
-            }
+                  if constexpr (std::is_void_v<R>)
+                  {
+                    fn();
+                    store.set();
+                  }
+                  else
+                  {
+                    R r = fn();
+                    store.set(std::move(r));
+                  }
+                }
+                catch (...)
+                {
+                  ex = std::current_exception();
+                }
 
-            pool->ctx_post(h); });
+                pool->ctx_post(h);
+              });
         }
 
         /**
@@ -243,7 +248,10 @@ namespace vix::async::core
         }
       };
 
-      co_return co_await awaitable{this, std::move(ct), std::forward<Fn>(fn)};
+      co_return co_await awaitable{
+          this,
+          std::move(ct),
+          std::forward<Fn>(fn)};
     }
 
     /**
@@ -267,7 +275,10 @@ namespace vix::async::core
      *
      * @return Number of workers.
      */
-    [[nodiscard]] std::size_t size() const noexcept { return workers_.size(); }
+    [[nodiscard]] std::size_t size() const noexcept
+    {
+      return workers_.size();
+    }
 
   private:
     /**
@@ -286,7 +297,7 @@ namespace vix::async::core
     void enqueue(std::function<void()> fn);
 
     /**
-     * @brief Post a coroutine handle back to the owning io_context.
+     * @brief Post a coroutine handle back to the owning io_context fast path.
      *
      * @param h Coroutine handle to resume.
      */
