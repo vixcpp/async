@@ -30,10 +30,16 @@ function(vix_async_link_asio onto link_scope)
   # Umbrella mode
   if (DEFINED VIX_UMBRELLA_BUILD AND VIX_UMBRELLA_BUILD)
     if (TARGET vix::thirdparty_asio)
-      target_link_libraries(${onto} ${link_scope} vix::thirdparty_asio)
+      get_target_property(_asio_inc vix::thirdparty_asio INTERFACE_INCLUDE_DIRECTORIES)
+      if (NOT _asio_inc)
+        message(FATAL_ERROR "[async] Umbrella build: vix::thirdparty_asio has no INTERFACE_INCLUDE_DIRECTORIES.")
+      endif()
+
+      target_include_directories(${onto} SYSTEM ${link_scope} ${_asio_inc})
       target_compile_definitions(${onto} ${link_scope} VIX_ASYNC_WITH_ASIO=1)
       return()
     endif()
+
     message(FATAL_ERROR "[async] Umbrella build: vix::thirdparty_asio must be provided by umbrella.")
   endif()
 
