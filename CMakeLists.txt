@@ -126,8 +126,8 @@ target_sources(vix_async
 )
 
 # Asio link (policy)
-vix_async_link_asio(vix_async PRIVATE)
-vix_async_apply_asio_common(vix_async PRIVATE)
+vix_async_link_asio(vix_async PUBLIC)
+vix_async_apply_asio_common(vix_async PUBLIC)
 
 # Warnings / sanitizers (module local)
 async_apply_warnings(vix_async)
