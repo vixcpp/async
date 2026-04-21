@@ -42,6 +42,8 @@ namespace vix::async::net::detail
     asio::io_context &asio_ctx() noexcept { return ioc_; }
     void stop() noexcept;
 
+    void join() noexcept;
+
   private:
     asio::io_context ioc_;
     std::unique_ptr<guard_t> guard_;

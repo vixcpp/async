@@ -95,6 +95,8 @@ namespace vix::async::net::detail
      */
     void stop() noexcept;
 
+    void join() noexcept;
+
   private:
     /**
      * @brief Bound core io_context.

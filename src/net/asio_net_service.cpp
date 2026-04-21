@@ -38,12 +38,12 @@ namespace vix::async::net::detail
         });
   }
 
-  asio_net_service::~asio_net_service()
+  void asio_net_service::join() noexcept
   {
-    stop();
-
     if (!net_thread_.joinable())
+    {
       return;
+    }
 
     const auto self_id = std::this_thread::get_id();
 
@@ -67,6 +67,12 @@ namespace vix::async::net::detail
       {
       }
     }
+  }
+
+  asio_net_service::~asio_net_service()
+  {
+    stop();
+    join();
   }
 
   void asio_net_service::stop() noexcept
