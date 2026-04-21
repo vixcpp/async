@@ -14,8 +14,17 @@
 #ifndef VIX_ASYNC_ASIO_NET_SERVICE_HPP
 #define VIX_ASYNC_ASIO_NET_SERVICE_HPP
 
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wnull-dereference"
+#endif
+
 #include <asio/io_context.hpp>
 #include <asio/executor_work_guard.hpp>
+
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
 
 #include <atomic>
 #include <memory>
