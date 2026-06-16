@@ -199,17 +199,11 @@ namespace vix::async::core
 
         {
           std::unique_lock<std::mutex> lock(m_);
+
           cv_.wait(lock, [this]()
                    { return stop_requested_.load(std::memory_order_acquire) ||
                             !handle_q_.empty() ||
                             !fn_q_.empty(); });
-
-          if (stop_requested_.load(std::memory_order_acquire))
-          {
-            handle_q_.clear();
-            fn_q_.clear();
-            break;
-          }
 
           if (!handle_q_.empty())
           {
@@ -220,6 +214,10 @@ namespace vix::async::core
           {
             fn = std::move(fn_q_.front());
             fn_q_.pop_front();
+          }
+          else if (stop_requested_.load(std::memory_order_acquire))
+          {
+            break;
           }
         }
 

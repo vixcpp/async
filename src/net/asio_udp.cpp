@@ -143,6 +143,15 @@ namespace vix::async::net
     void close() noexcept override
     {
       std::error_code ec;
+
+      if (!sock_.is_open())
+      {
+        return;
+      }
+
+      sock_.cancel(ec);
+      ec.clear();
+
       sock_.close(ec);
     }
 

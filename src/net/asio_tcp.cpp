@@ -154,6 +154,18 @@ namespace vix::async::net
     void close() noexcept override
     {
       std::error_code ec;
+
+      if (!sock_.is_open())
+      {
+        return;
+      }
+
+      sock_.cancel(ec);
+      ec.clear();
+
+      sock_.shutdown(tcp::socket::shutdown_both, ec);
+      ec.clear();
+
       sock_.close(ec);
     }
 
@@ -245,6 +257,15 @@ namespace vix::async::net
     void close() noexcept override
     {
       std::error_code ec;
+
+      if (!acc_.is_open())
+      {
+        return;
+      }
+
+      acc_.cancel(ec);
+      ec.clear();
+
       acc_.close(ec);
     }
 

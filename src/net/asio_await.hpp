@@ -81,8 +81,22 @@ namespace vix::async::net::detail
       vix::async::core::io_context *ctx,
       std::coroutine_handle<> h) noexcept
   {
-    if (!ctx || !h)
+    if (!h)
     {
+      return;
+    }
+
+    if (!ctx)
+    {
+      h.resume();
+      return;
+    }
+
+    auto &sched = ctx->get_scheduler();
+
+    if (sched.stop_requested())
+    {
+      h.resume();
       return;
     }
 
