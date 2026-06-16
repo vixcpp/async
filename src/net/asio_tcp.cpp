@@ -27,6 +27,7 @@
 #include <string>
 #include <system_error>
 #include <utility>
+#include <atomic>
 
 namespace vix::async::net
 {
@@ -194,7 +195,7 @@ namespace vix::async::net
   public:
     explicit tcp_listener_asio(core::io_context &ctx)
         : ctx_(ctx),
-          acc_(ctx_.net().asio_ctx())
+          acc_(std::make_shared<tcp::acceptor>(ctx_.net().asio_ctx()))
     {
     }
 
@@ -206,29 +207,32 @@ namespace vix::async::net
 
       std::error_code ec;
 
-      acc_.open(ep.protocol(), ec);
+      acc_->open(ep.protocol(), ec);
       if (ec)
       {
         throw std::system_error(ec);
       }
 
-      acc_.set_option(tcp::acceptor::reuse_address(true), ec);
+      acc_->set_option(tcp::acceptor::reuse_address(true), ec);
       if (ec)
       {
         throw std::system_error(ec);
       }
 
-      acc_.bind(ep, ec);
+      acc_->bind(ep, ec);
       if (ec)
       {
         throw std::system_error(ec);
       }
 
-      acc_.listen(backlog, ec);
+      acc_->listen(backlog, ec);
       if (ec)
       {
         throw std::system_error(ec);
       }
+
+      open_.store(true, std::memory_order_release);
+      closing_.store(false, std::memory_order_release);
 
       co_return;
     }
@@ -236,16 +240,22 @@ namespace vix::async::net
     vix::async::core::task<std::unique_ptr<tcp_stream>> async_accept(
         vix::async::core::cancel_token ct) override
     {
+      if (ct.is_cancelled() || !open_.load(std::memory_order_acquire))
+      {
+        throw std::system_error(vix::async::core::cancelled_ec());
+      }
+
       auto client = std::make_unique<tcp_stream_asio>(ctx_);
+      auto acc = acc_;
 
       co_await detail::co_asio_void(
           ctx_,
           ct,
-          [&](auto done)
+          [acc, client_ptr = client.get()](auto done)
           {
-            acc_.async_accept(
-                client->native(),
-                [done = std::move(done)](std::error_code ec) mutable
+            acc->async_accept(
+                client_ptr->native(),
+                [acc, done = std::move(done)](std::error_code ec) mutable
                 {
                   done(ec);
                 });
@@ -256,29 +266,65 @@ namespace vix::async::net
 
     void close() noexcept override
     {
-      std::error_code ec;
+      open_.store(false, std::memory_order_release);
 
-      if (!acc_.is_open())
+      if (closing_.exchange(true, std::memory_order_acq_rel))
       {
         return;
       }
 
-      acc_.cancel(ec);
-      ec.clear();
+      auto acc = acc_;
 
-      acc_.close(ec);
+      try
+      {
+        asio::post(
+            acc->get_executor(),
+            [acc]() mutable
+            {
+              std::error_code ec;
+
+              if (!acc->is_open())
+              {
+                return;
+              }
+
+              acc->cancel(ec);
+              ec.clear();
+
+              acc->close(ec);
+            });
+      }
+      catch (...)
+      {
+        std::error_code ec;
+
+        try
+        {
+          if (acc && acc->is_open())
+          {
+            acc->cancel(ec);
+            ec.clear();
+
+            acc->close(ec);
+          }
+        }
+        catch (...)
+        {
+        }
+      }
     }
 
     bool is_open() const noexcept override
     {
-      return acc_.is_open();
+      return open_.load(std::memory_order_acquire);
     }
 
   private:
     vix::async::core::io_context &ctx_;
-    tcp::acceptor acc_;
+    std::shared_ptr<tcp::acceptor> acc_;
+    std::atomic_bool open_{false};
+    std::atomic_bool closing_{false};
   };
-
   std::unique_ptr<tcp_stream> make_tcp_stream(vix::async::core::io_context &ctx)
   {
     return std::make_unique<tcp_stream_asio>(ctx);
