@@ -1,35 +1,42 @@
 cmake_minimum_required(VERSION 3.20)
 
-add_executable(async_task_smoke
-  core/task_smoke_test.cpp
-)
+function(vix_async_add_test test_name test_source ctest_name)
+  add_executable(${test_name}
+    ${test_source}
+  )
 
-add_executable(async_cancel_smoke
-  core/cancel_smoke_test.cpp
-)
+  target_compile_features(${test_name}
+    PRIVATE
+      cxx_std_20
+  )
 
-add_executable(async_scheduler_smoke
-  core/scheduler_smoke_test.cpp
-)
+  target_link_libraries(${test_name}
+    PRIVATE
+      vix::async
+  )
 
-add_executable(async_when_smoke
-  core/when_smoke_test.cpp
-)
+  async_apply_warnings(${test_name})
 
-# Link against the library
-target_link_libraries(async_task_smoke PRIVATE vix::async)
-target_link_libraries(async_cancel_smoke PRIVATE vix::async)
-target_link_libraries(async_scheduler_smoke PRIVATE vix::async)
-target_link_libraries(async_when_smoke PRIVATE vix::async)
+  if (VIX_ENABLE_SANITIZERS AND NOT MSVC)
+    target_compile_options(${test_name}
+      PRIVATE
+        -fno-omit-frame-pointer
+        -fsanitize=address,undefined
+    )
 
-# Keep tests strict too
-async_apply_warnings(async_task_smoke)
-async_apply_warnings(async_cancel_smoke)
-async_apply_warnings(async_scheduler_smoke)
-async_apply_warnings(async_when_smoke)
+    target_link_options(${test_name}
+      PRIVATE
+        -fsanitize=address,undefined
+    )
+  endif()
 
-# Register with CTest
-add_test(NAME async.task_smoke       COMMAND async_task_smoke)
-add_test(NAME async.cancel_smoke     COMMAND async_cancel_smoke)
-add_test(NAME async.scheduler_smoke  COMMAND async_scheduler_smoke)
-add_test(NAME async.when_smoke       COMMAND async_when_smoke)
+  add_test(
+    NAME ${ctest_name}
+    COMMAND ${test_name}
+  )
+endfunction()
+
+vix_async_add_test(async_task_smoke core/task_smoke_test.cpp async.task_smoke)
+vix_async_add_test(async_cancel_smoke core/cancel_smoke_test.cpp async.cancel_smoke)
+vix_async_add_test(async_scheduler_smoke core/scheduler_smoke_test.cpp async.scheduler_smoke)
+vix_async_add_test(async_when_smoke core/when_smoke_test.cpp async.when_smoke)
