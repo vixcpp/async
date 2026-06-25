@@ -140,8 +140,7 @@ namespace vix::async::net
           ct,
           [&](auto done)
           {
-            asio::async_write(
-                sock_,
+            sock_.async_write_some(
                 asio::buffer(buf.data(), buf.size()),
                 [done = std::move(done)](
                     std::error_code ec,
@@ -255,8 +254,14 @@ namespace vix::async::net
           {
             acc->async_accept(
                 client_ptr->native(),
-                [acc, done = std::move(done)](std::error_code ec) mutable
+                [acc, client_ptr, done = std::move(done)](std::error_code ec) mutable
                 {
+                  if (!ec)
+                  {
+                    std::error_code ignored;
+                    client_ptr->native().set_option(tcp::no_delay(true), ignored);
+                  }
+
                   done(ec);
                 });
           });
