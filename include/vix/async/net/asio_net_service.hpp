@@ -16,6 +16,7 @@
 #ifndef VIX_ASYNC_ASIO_NET_SERVICE_HPP
 #define VIX_ASYNC_ASIO_NET_SERVICE_HPP
 
+#include <atomic>
 #include <memory>
 #include <thread>
 
@@ -97,21 +98,17 @@ namespace vix::async::net::detail
 
     void join() noexcept;
 
-  private:
-    /**
-     * @brief Bound core io_context.
-     */
-    vix::async::core::io_context &ctx_;
-
-    /**
-     * @brief Asio io_context used for networking operations.
-     */
-    asio::io_context ioc_;
-
+  public:
     /**
      * @brief Work guard type used to keep asio_ctx() running.
      */
     using guard_t = asio::executor_work_guard<asio::io_context::executor_type>;
+
+  private:
+    /**
+     * @brief Asio io_context used for networking operations.
+     */
+    asio::io_context ioc_;
 
     /**
      * @brief Work guard instance (null when stopped).
@@ -126,7 +123,7 @@ namespace vix::async::net::detail
     /**
      * @brief Indicates whether stop() has been requested.
      */
-    bool stopped_{false};
+    std::atomic_bool stopped_{false};
   };
 
 } // namespace vix::async::net::detail
