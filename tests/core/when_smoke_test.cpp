@@ -134,10 +134,10 @@ static task<int> delayed_value(scheduler &sched, int v, int delay_ms)
 
     void await_suspend(std::coroutine_handle<> h)
     {
-      std::thread([s = s, ms = ms, h]() mutable
+      std::thread([sched = s, delay_ms = ms, h]() mutable
                   {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(ms));
-                    s->post(h); })
+                    std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms));
+                    sched->post(h); })
           .detach();
     }
 

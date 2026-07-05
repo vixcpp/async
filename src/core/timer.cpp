@@ -121,11 +121,11 @@ namespace vix::async::core
       {
         self->after(
             d,
-            [self = self, h]() mutable
+            [timer_self = self, h]() mutable
             {
-              if (self && h)
+              if (timer_self && h)
               {
-                self->ctx_post_handle(h);
+                timer_self->ctx_post_handle(h);
               }
             },
             ct);

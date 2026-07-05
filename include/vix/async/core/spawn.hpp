@@ -94,9 +94,9 @@ namespace vix::async::core
            *
            * @param h Coroutine handle to destroy.
            */
-          void await_suspend(std::coroutine_handle<promise_type> h) noexcept
+          void await_suspend(std::coroutine_handle<promise_type> handle) noexcept
           {
-            h.destroy();
+            handle.destroy();
           }
 
           /**

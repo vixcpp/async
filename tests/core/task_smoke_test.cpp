@@ -41,7 +41,6 @@ static task<int> add_one(int x)
 static task<void> throws_task()
 {
   throw std::runtime_error("boom");
-  co_return;
 }
 
 static task<void> chain_void()
