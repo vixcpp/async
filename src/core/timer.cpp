@@ -114,7 +114,7 @@ namespace vix::async::core
 
       bool await_ready() const noexcept
       {
-        return d.count() == 0;
+        return d.count() == 0 || ct.is_cancelled();
       }
 
       void await_suspend(std::coroutine_handle<> h)
@@ -127,8 +127,7 @@ namespace vix::async::core
               {
                 timer_self->ctx_post_handle(h);
               }
-            },
-            ct);
+            });
       }
 
       void await_resume()
