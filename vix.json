@@ -1,12 +1,15 @@
 {
-  "name": "async",
   "namespace": "vix",
-  "version": "0.1.0",
-  "type": "header-and-source",
-  "include": "include",
-  "src": "src",
+  "name": "async",
+  "displayName": "Vix Async",
+  "version": "1.2.1",
+  "type": "library",
   "license": "MIT",
-  "description": "Low-level async runtime (scheduler, coroutines, timers, thread pool) for Vix.cpp",
+  "description": "Low-level C++20 asynchronous runtime with coroutines, scheduling, timers, thread pools, and networking primitives.",
+  "repository": "https://github.com/vixcpp/async.git",
+  "documentation": "https://github.com/vixcpp/async#readme",
+  "include": "include",
+  "standard": "c++20",
   "keywords": [
     "cpp",
     "vix",
@@ -15,13 +18,35 @@
     "scheduler",
     "thread-pool",
     "timers",
-    "runtime"
+    "runtime",
+    "networking"
   ],
-  "repository": "https://github.com/vixcpp/async",
   "authors": [
     {
       "name": "Gaspard Kirira",
-      "github": "Gaspardkirira"
+      "github": "GaspardKirira"
     }
-  ]
+  ],
+  "maintainers": [
+    {
+      "name": "Gaspard Kirira",
+      "github": "GaspardKirira"
+    }
+  ],
+  "exports": {
+    "modules": [
+      "vix::async"
+    ],
+    "namespaces": [
+      "vix::async"
+    ]
+  },
+  "constraints": {
+    "platforms": [
+      "linux",
+      "macos",
+      "windows"
+    ]
+  },
+  "deps": []
 }
