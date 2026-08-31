@@ -128,6 +128,11 @@ namespace vix::async::core
      */
     void stop() noexcept;
 
+    /**
+     * @brief Check whether the timer service has been stopped.
+     */
+    [[nodiscard]] bool stopped() const noexcept;
+
   private:
     /**
      * @brief Type-erased timer job.
@@ -195,7 +200,11 @@ namespace vix::async::core
      * @param j Job to execute.
      * @param ct Cancellation token.
      */
-    void schedule(time_point tp, std::unique_ptr<job> j, cancel_token ct);
+    void schedule(
+        time_point tp,
+        std::unique_ptr<job> j,
+        cancel_token ct,
+        std::function<void()> on_stop = {});
 
     /**
      * @brief Worker loop waiting for the next deadline and dispatching jobs.
@@ -265,6 +274,12 @@ namespace vix::async::core
        * @brief Job to execute.
        */
       std::unique_ptr<job> j;
+
+      /**
+       * @brief Optional completion invoked when the timer service stops before
+       * this entry fires.
+       */
+      std::function<void()> on_stop{};
     };
 
     /**

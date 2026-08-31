@@ -13,7 +13,9 @@
  */
 #include <cassert>
 #include <chrono>
+#include <condition_variable>
 #include <future>
+#include <mutex>
 #include <iostream>
 #include <memory>
 #include <optional>
@@ -114,38 +116,92 @@ static decltype(auto) get_value(X &&x)
     return std::forward<X>(x); // T direct
 }
 
-// Test coroutines
+// Test-only lifetime tracker for synthetic delayed completions.
+// when_any intentionally leaves losing tasks running, so the test keeps the
+// scheduler alive until every detached delay source has posted its completion.
+struct delayed_jobs
+{
+  void reserve()
+  {
+    std::lock_guard<std::mutex> lock(m);
+    ++outstanding;
+  }
+
+  void complete()
+  {
+    std::lock_guard<std::mutex> lock(m);
+    assert(outstanding > 0);
+    --outstanding;
+    cv.notify_all();
+  }
+
+  void wait()
+  {
+    std::unique_lock<std::mutex> lock(m);
+    cv.wait(lock, [this]()
+            { return outstanding == 0; });
+  }
+
+  std::mutex m;
+  std::condition_variable cv;
+  std::size_t outstanding{0};
+};
+
 static task<int> immediate(int v)
 {
   co_return v;
 }
 
-static task<int> delayed_value(scheduler &sched, int v, int delay_ms)
+static task<int> delayed_value_impl(
+    scheduler &sched,
+    delayed_jobs &jobs,
+    int v,
+    int delay_ms)
 {
-  // Force execution onto the scheduler thread first
+  // Force execution onto the scheduler thread first.
   co_await sched.schedule();
 
   struct awaitable
   {
     scheduler *s{};
+    delayed_jobs *jobs{};
     int ms{0};
 
-    bool await_ready() const noexcept { return ms <= 0; }
+    bool await_ready() const noexcept { return false; }
 
     void await_suspend(std::coroutine_handle<> h)
     {
-      std::thread([sched = s, delay_ms = ms, h]() mutable
+      std::thread([sched = s, tracked = jobs, delay_ms = ms, h]() mutable
                   {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms));
-                    sched->post(h); })
+                    if (delay_ms > 0)
+                    {
+                      std::this_thread::sleep_for(
+                          std::chrono::milliseconds(delay_ms));
+                    }
+
+                    sched->post(h);
+                    tracked->complete(); })
           .detach();
     }
 
     void await_resume() noexcept {}
   };
 
-  co_await awaitable{&sched, delay_ms};
+  co_await awaitable{&sched, &jobs, delay_ms};
   co_return v;
+}
+
+static task<int> delayed_value(
+    scheduler &sched,
+    delayed_jobs &jobs,
+    int v,
+    int delay_ms)
+{
+  // Reserve synchronously, before the lazy coroutine is returned. This makes
+  // delayed_jobs::wait() a real lifetime barrier even if a when_any winner
+  // completes before this coroutine reaches await_suspend().
+  jobs.reserve();
+  return delayed_value_impl(sched, jobs, v, delay_ms);
 }
 
 static task<void> test_when_all_basic(scheduler &sched)
@@ -161,15 +217,22 @@ static task<void> test_when_all_basic(scheduler &sched)
   co_return;
 }
 
-static task<void> test_when_all_mixed_timing(scheduler &sched)
+static task<void> test_when_all_empty(scheduler &sched)
+{
+  auto tup = co_await when_all(sched);
+  static_assert(std::tuple_size_v<decltype(tup)> == 0);
+  co_return;
+}
+
+static task<void> test_when_all_mixed_timing(scheduler &sched, delayed_jobs &jobs)
 {
   co_await sched.schedule();
 
   auto tup = co_await when_all(
       sched,
-      delayed_value(sched, 1, 50),
-      delayed_value(sched, 2, 10),
-      delayed_value(sched, 3, 30));
+      delayed_value(sched, jobs, 1, 50),
+      delayed_value(sched, jobs, 2, 10),
+      delayed_value(sched, jobs, 3, 30));
 
   static_assert(std::tuple_size_v<decltype(tup)> == 3);
   assert(std::get<0>(tup) == 1);
@@ -179,14 +242,14 @@ static task<void> test_when_all_mixed_timing(scheduler &sched)
   co_return;
 }
 
-static task<void> test_when_any_picks_first(scheduler &sched)
+static task<void> test_when_any_picks_first(scheduler &sched, delayed_jobs &jobs)
 {
   co_await sched.schedule();
 
   auto result = co_await when_any(
       sched,
-      delayed_value(sched, 111, 60),
-      delayed_value(sched, 222, 10));
+      delayed_value(sched, jobs, 111, 60),
+      delayed_value(sched, jobs, 222, 10));
 
   const auto &vals = result.second;
 
@@ -200,14 +263,14 @@ static task<void> test_when_any_picks_first(scheduler &sched)
   co_return;
 }
 
-static task<void> test_when_any_handles_immediate(scheduler &sched)
+static task<void> test_when_any_handles_immediate(scheduler &sched, delayed_jobs &jobs)
 {
   co_await sched.schedule();
 
   auto result = co_await when_any(
       sched,
       immediate(7),
-      delayed_value(sched, 9, 30));
+      delayed_value(sched, jobs, 9, 30));
 
   const auto &vals = result.second;
 
@@ -223,13 +286,20 @@ static task<void> test_when_any_handles_immediate(scheduler &sched)
 
 int main()
 {
+  delayed_jobs jobs;
   scheduler sched;
   scheduler_runner run{sched};
 
   sync_wait<void>(sched, test_when_all_basic(sched));
-  sync_wait<void>(sched, test_when_all_mixed_timing(sched));
-  sync_wait<void>(sched, test_when_any_picks_first(sched));
-  sync_wait<void>(sched, test_when_any_handles_immediate(sched));
+  sync_wait<void>(sched, test_when_all_empty(sched));
+  sync_wait<void>(sched, test_when_all_mixed_timing(sched, jobs));
+  sync_wait<void>(sched, test_when_any_picks_first(sched, jobs));
+  sync_wait<void>(sched, test_when_any_handles_immediate(sched, jobs));
+
+  // when_any returns when the winner completes. Losing tasks keep running.
+  // Wait for every synthetic external completion source before allowing the
+  // scheduler to be destroyed.
+  jobs.wait();
 
   std::cout << "async_when_smoke: OK\n";
   return 0;

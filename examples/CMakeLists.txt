@@ -29,3 +29,7 @@ async_add_example(async_example_02_thread_pool
 async_add_example(async_example_04_when_all_any
   when_all_any.cpp
 )
+
+async_add_example(async_example_03_tcp_echo_server
+  03_tcp_echo_server.cpp
+)

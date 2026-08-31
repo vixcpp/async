@@ -34,9 +34,9 @@ task<void> demo(scheduler &sched)
 
   std::cout << "when_any: index=" << idx << " value=";
   if (idx == 0)
-    std::cout << std::get<0>(vals);
+    std::cout << *std::get<0>(vals);
   else
-    std::cout << std::get<1>(vals);
+    std::cout << *std::get<1>(vals);
   std::cout << "\n";
 
   sched.stop();

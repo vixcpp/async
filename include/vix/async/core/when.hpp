@@ -20,6 +20,7 @@
 #include <coroutine>
 #include <exception>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <tuple>
 #include <type_traits>
@@ -109,8 +110,10 @@ namespace vix::async::core
      *
      * @param slot Destination slot.
      */
-    inline void store_into(stored_t<void> &slot)
+    template <typename T>
+    inline void store_into(stored_t<T> &slot)
     {
+      static_assert(std::is_void_v<T>);
       slot.emplace(std::monostate{});
     }
 
@@ -122,19 +125,17 @@ namespace vix::async::core
      * @return Value moved.
      */
     template <typename T>
-    inline std::decay_t<T> materialize_one(stored_t<T> &slot)
+    inline std::conditional_t<std::is_void_v<T>, std::monostate, std::decay_t<T>>
+    materialize_one(stored_t<T> &slot)
     {
-      return std::move(*slot);
-    }
-
-    /**
-     * @brief Materialize a void slot as std::monostate.
-     *
-     * @return std::monostate
-     */
-    inline std::monostate materialize_one(stored_t<void> &)
-    {
-      return std::monostate{};
+      if constexpr (std::is_void_v<T>)
+      {
+        return std::monostate{};
+      }
+      else
+      {
+        return std::move(*slot);
+      }
     }
 
     /**
@@ -172,6 +173,44 @@ namespace vix::async::core
     }
 
     /**
+     * @brief Move only the winning when_any slot into an output tuple.
+     *
+     * Losing runners continue after when_any resumes. Touching only the winning
+     * slot prevents the caller from racing with later writes to loser slots.
+     */
+    template <std::size_t I = 0, typename... Ts>
+    inline void extract_when_any_winner(
+        std::size_t index,
+        std::tuple<stored_t<Ts>...> &source,
+        std::tuple<stored_t<Ts>...> &output)
+    {
+      if constexpr (I < sizeof...(Ts))
+      {
+        if (index == I)
+        {
+          auto &src = std::get<I>(source);
+          auto &dst = std::get<I>(output);
+
+          if (src)
+          {
+            using logical_type = std::tuple_element_t<I, std::tuple<Ts...>>;
+            if constexpr (std::is_void_v<logical_type>)
+            {
+              dst.emplace(std::monostate{});
+            }
+            else
+            {
+              dst.emplace(std::move(*src));
+            }
+          }
+          return;
+        }
+
+        extract_when_any_winner<I + 1, Ts...>(index, source, output);
+      }
+    }
+
+    /**
      * @brief Shared state for when_all.
      *
      * Tracks:
@@ -188,6 +227,7 @@ namespace vix::async::core
       scheduler *sched{};
       std::atomic<std::size_t> remaining{sizeof...(Ts)};
       std::coroutine_handle<> cont{};
+      std::mutex exception_mutex{};
       std::exception_ptr first_ex{};
       std::tuple<stored_t<Ts>...> results{};
     };
@@ -223,6 +263,7 @@ namespace vix::async::core
       }
       catch (...)
       {
+        std::lock_guard<std::mutex> lock(st->exception_mutex);
         if (!st->first_ex)
         {
           st->first_ex = std::current_exception();
@@ -360,6 +401,8 @@ namespace vix::async::core
     template <std::size_t I, typename T, typename... Ts>
     task<void> when_any_runner(std::shared_ptr<when_any_state<Ts...>> st, task<T> t)
     {
+      std::exception_ptr local_ex{};
+
       try
       {
         if constexpr (std::is_void_v<T>)
@@ -375,16 +418,14 @@ namespace vix::async::core
       }
       catch (...)
       {
-        if (!st->ex)
-        {
-          st->ex = std::current_exception();
-        }
+        local_ex = std::current_exception();
       }
 
       bool expected = false;
       if (st->done.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
       {
         st->index = I;
+        st->ex = std::move(local_ex);
 
         if (st->sched)
         {
@@ -448,7 +489,9 @@ namespace vix::async::core
           std::rethrow_exception(st->ex);
         }
 
-        return {st->index, std::move(st->results)};
+        std::tuple<stored_t<Ts>...> output{};
+        extract_when_any_winner<0, Ts...>(st->index, st->results, output);
+        return {st->index, std::move(output)};
       }
 
     private:
@@ -496,14 +539,21 @@ namespace vix::async::core
   task<std::tuple<std::conditional_t<std::is_void_v<Ts>, std::monostate, Ts>...>>
   when_all(scheduler &sched, task<Ts>... ts)
   {
-    co_await sched.schedule();
+    if constexpr (sizeof...(Ts) == 0)
+    {
+      co_return std::tuple<>{};
+    }
+    else
+    {
+      co_await sched.schedule();
 
-    detail::when_all_awaitable<Ts...> aw{
-        &sched,
-        std::tuple<task<Ts>...>{std::move(ts)...}};
+      detail::when_all_awaitable<Ts...> aw{
+          &sched,
+          std::tuple<task<Ts>...>{std::move(ts)...}};
 
-    auto out = co_await detail::as_awaitable(std::move(aw));
-    co_return out;
+      auto out = co_await detail::as_awaitable(std::move(aw));
+      co_return out;
+    }
   }
 
   /**
@@ -523,9 +573,11 @@ namespace vix::async::core
    * @return task<pair<index, tuple<...>>> with void mapped to monostate.
    */
   template <typename... Ts>
-  task<std::pair<std::size_t, std::tuple<std::conditional_t<std::is_void_v<Ts>, std::monostate, Ts>...>>>
+  task<std::pair<std::size_t, std::tuple<detail::stored_t<Ts>...>>>
   when_any(scheduler &sched, task<Ts>... ts)
   {
+    static_assert(sizeof...(Ts) > 0, "when_any requires at least one task");
+
     co_await sched.schedule();
 
     detail::when_any_awaitable<Ts...> aw{
@@ -533,14 +585,9 @@ namespace vix::async::core
         std::tuple<task<Ts>...>{std::move(ts)...}};
 
     auto [idx, raw] = co_await detail::as_awaitable(std::move(aw));
-
-    using OutTuple = std::tuple<std::conditional_t<std::is_void_v<Ts>, std::monostate, Ts>...>;
-    using Ret = std::pair<std::size_t, OutTuple>;
-
-    Ret r;
-    r.first = idx;
-    r.second = detail::materialize_tuple<Ts...>(std::move(raw));
-    co_return r;
+    co_return std::pair<std::size_t, std::tuple<detail::stored_t<Ts>...>>{
+        idx,
+        std::move(raw)};
   }
 
 } // namespace vix::async::core

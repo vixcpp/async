@@ -16,10 +16,12 @@
 #ifndef VIX_ASYNC_SIGNAL_HPP
 #define VIX_ASYNC_SIGNAL_HPP
 
+#include <atomic>
 #include <csignal>
 #include <coroutine>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <queue>
 #include <thread>
@@ -52,6 +54,14 @@ namespace vix::async::core
    */
   class signal_set
   {
+    struct wait_state
+    {
+      std::atomic<bool> completed{false};
+      std::coroutine_handle<> continuation{};
+      int signal{0};
+      errc outcome{errc::ok};
+    };
+
   public:
     /**
      * @brief Construct a signal_set bound to an io_context.
@@ -191,15 +201,11 @@ namespace vix::async::core
      */
     std::thread worker_;
 
-    /**
-     * @brief Coroutine handle waiting for a signal single waiter model.
-     */
-    std::coroutine_handle<> waiter_{};
+    /** @brief Currently active waiter. Only one waiter is allowed. */
+    std::shared_ptr<wait_state> waiter_{};
 
-    /**
-     * @brief Whether a waiter coroutine is currently active.
-     */
-    bool waiter_active_{false};
+    /** @brief Signal currently used by the worker's blocking sigwait call. */
+    int wake_signal_{0};
   };
 
 } // namespace vix::async::core

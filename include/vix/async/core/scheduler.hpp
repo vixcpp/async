@@ -192,6 +192,15 @@ namespace vix::async::core
     {
       running_.store(true, std::memory_order_release);
 
+      struct running_guard
+      {
+        std::atomic<bool> &running;
+        ~running_guard()
+        {
+          running.store(false, std::memory_order_release);
+        }
+      } guard{running_};
+
       while (true)
       {
         std::coroutine_handle<> h{};
@@ -223,17 +232,27 @@ namespace vix::async::core
 
         if (h)
         {
-          h.resume();
+          try
+          {
+            h.resume();
+          }
+          catch (...)
+          {
+          }
           continue;
         }
 
         if (fn)
         {
-          fn();
+          try
+          {
+            fn();
+          }
+          catch (...)
+          {
+          }
         }
       }
-
-      running_.store(false, std::memory_order_release);
     }
 
     /**

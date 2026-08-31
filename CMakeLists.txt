@@ -7,7 +7,7 @@
 # Standalone vs Umbrella
 if (CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
   cmake_minimum_required(VERSION 3.20)
-  project(vix_async VERSION 0.1.0 LANGUAGES CXX)
+  project(vix_async VERSION 1.2.1 LANGUAGES CXX)
 
   set(CMAKE_CXX_STANDARD 20)
   set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -20,6 +20,7 @@ include(GNUInstallDirs)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(AsyncOptions)
 include(AsyncWarnings)
+include(AsyncSanitizers)
 
 # ----------------------------------------------------
 # Asio policy (same spirit as p2p)
@@ -116,6 +117,10 @@ file(GLOB_RECURSE VIX_ASYNC_HEADERS CONFIGURE_DEPENDS
   "${CMAKE_CURRENT_SOURCE_DIR}/include/vix/async/*.h"
 )
 
+list(APPEND VIX_ASYNC_HEADERS
+  "${CMAKE_CURRENT_SOURCE_DIR}/include/vix/async.hpp"
+)
+
 target_sources(vix_async
   PRIVATE
     ${VIX_ASYNC_SOURCES}
@@ -131,6 +136,7 @@ vix_async_apply_asio_common(vix_async PUBLIC)
 
 # Warnings / sanitizers (module local)
 async_apply_warnings(vix_async)
+async_apply_sanitizers(vix_async)
 
 set_target_properties(vix_async PROPERTIES
   CXX_EXTENSIONS OFF

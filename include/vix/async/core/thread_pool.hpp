@@ -23,6 +23,7 @@
 #include <deque>
 #include <exception>
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <system_error>
@@ -108,6 +109,8 @@ namespace vix::async::core
    */
   class thread_pool
   {
+    struct shared_state;
+
   public:
     /**
      * @brief Construct a thread pool attached to an io_context.
@@ -137,7 +140,7 @@ namespace vix::async::core
      *
      * @param fn Callable to execute.
      */
-    void submit(std::function<void()> fn);
+    [[nodiscard]] bool post(std::function<void()> fn);
 
     /**
      * @brief Submit a callable and await its result as a coroutine task.
@@ -155,14 +158,68 @@ namespace vix::async::core
      * @return Async task producing the callable result type.
      */
     template <typename Fn>
-    auto submit(Fn &&fn, cancel_token ct = {}) -> task<std::invoke_result_t<Fn>>
+    auto submit(Fn &&fn, cancel_token ct = {})
+        -> task<std::invoke_result_t<std::decay_t<Fn> &>>
     {
-      using R = std::invoke_result_t<Fn>;
+      using function_type = std::decay_t<Fn>;
+      using R = std::invoke_result_t<function_type &>;
+
+      return submit_impl<function_type, R>(
+          state_,
+          &ctx_,
+          function_type(std::forward<Fn>(fn)),
+          std::move(ct));
+    }
+
+    /**
+     * @brief Return whether the pool has accepted a stop request.
+     *
+     * @return true once stop() or shutdown() has been requested.
+     */
+    [[nodiscard]] bool stopped() const noexcept;
+
+    /**
+     * @brief Request the pool to stop accepting and processing new work.
+     *
+     * This wakes all workers so they can exit once pending work is drained
+     * according to the worker loop logic.
+     */
+    void stop() noexcept;
+
+    /**
+     * @brief Stop the pool and join all workers safely.
+     *
+     * This operation is idempotent and safe to call multiple times.
+     * It also protects against self-join during destruction.
+     */
+    void shutdown() noexcept;
+
+    /**
+     * @brief Return the number of worker threads owned by the pool.
+     *
+     * @return Number of workers.
+     */
+    [[nodiscard]] std::size_t size() const noexcept
+    {
+      return workers_.size();
+    }
+
+  private:
+    template <typename Fn, typename R>
+    static task<R> submit_impl(
+        std::shared_ptr<shared_state> state,
+        io_context *ctx,
+        Fn fn,
+        cancel_token ct)
+    {
 
       struct awaitable
       {
-        /** @brief Pool used to enqueue the callable. */
-        thread_pool *pool{};
+        /** @brief Shared worker state used to enqueue the callable. */
+        std::shared_ptr<shared_state> state{};
+
+        /** @brief Context used to resume the awaiting coroutine. */
+        io_context *ctx{};
 
         /** @brief Optional cancellation token. */
         cancel_token ct{};
@@ -193,7 +250,8 @@ namespace vix::async::core
          */
         void await_suspend(std::coroutine_handle<> h)
         {
-          pool->enqueue(
+          const bool accepted = thread_pool::enqueue_shared(
+              state,
               [this, h]() mutable
               {
                 try
@@ -219,8 +277,15 @@ namespace vix::async::core
                   ex = std::current_exception();
                 }
 
-                pool->ctx_post(h);
+                thread_pool::post_to_context(ctx, h);
               });
+
+          if (!accepted)
+          {
+            ex = std::make_exception_ptr(
+                std::system_error(make_error_code(errc::rejected)));
+            thread_pool::post_to_context(ctx, h);
+          }
         }
 
         /**
@@ -249,75 +314,44 @@ namespace vix::async::core
       };
 
       co_return co_await awaitable{
-          this,
+          std::move(state),
+          ctx,
           std::move(ct),
-          std::forward<Fn>(fn)};
+          std::move(fn)};
     }
 
-    /**
-     * @brief Request the pool to stop accepting and processing new work.
-     *
-     * This wakes all workers so they can exit once pending work is drained
-     * according to the worker loop logic.
-     */
-    void stop() noexcept;
-
-    /**
-     * @brief Stop the pool and join all workers safely.
-     *
-     * This operation is idempotent and safe to call multiple times.
-     * It also protects against self-join during destruction.
-     */
-    void shutdown() noexcept;
-
-    /**
-     * @brief Return the number of worker threads owned by the pool.
-     *
-     * @return Number of workers.
-     */
-    [[nodiscard]] std::size_t size() const noexcept
-    {
-      return workers_.size();
-    }
-
-  private:
     /**
      * @brief Worker thread main loop.
      *
      * Waits for queued work, executes callables, and exits when shutdown is
      * requested and no work remains.
      */
-    void worker_loop();
+    static void worker_loop(std::shared_ptr<shared_state> state);
 
     /**
      * @brief Enqueue one callable into the worker queue.
      *
      * @param fn Callable to enqueue.
      */
-    void enqueue(std::function<void()> fn);
+    static bool enqueue_shared(
+        const std::shared_ptr<shared_state> &state,
+        std::function<void()> fn);
 
     /**
      * @brief Post a coroutine handle back to the owning io_context fast path.
      *
      * @param h Coroutine handle to resume.
      */
-    void ctx_post(std::coroutine_handle<> h);
+    static void post_to_context(
+        io_context *ctx,
+        std::coroutine_handle<> h) noexcept;
 
   private:
     /** @brief Owning io_context used for coroutine resumption. */
     io_context &ctx_;
 
-    /** @brief Mutex protecting queue and stop state. */
-    mutable std::mutex m_;
-
-    /** @brief Condition variable used to wake worker threads. */
-    std::condition_variable cv_;
-
-    /** @brief FIFO queue of pending callables. */
-    std::deque<std::function<void()>> q_;
-
-    /** @brief Stop flag checked by workers and enqueue logic. */
-    bool stop_{false};
+    /** @brief Shared state retained by worker threads during shutdown. */
+    std::shared_ptr<shared_state> state_;
 
     /** @brief Owned worker threads. */
     std::vector<std::thread> workers_;

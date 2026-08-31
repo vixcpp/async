@@ -14,15 +14,28 @@
 #include <vix/async/core/timer.hpp>
 #include <vix/async/core/io_context.hpp>
 
+#include <atomic>
 #include <coroutine>
 #include <functional>
 #include <memory>
 #include <system_error>
 #include <thread>
 #include <utility>
+#include <vector>
 
 namespace vix::async::core
 {
+  namespace
+  {
+    struct sleep_state
+    {
+      std::atomic<bool> completed{false};
+      std::atomic<errc> outcome{errc::ok};
+      std::coroutine_handle<> continuation{};
+      cancel_registration cancellation{};
+    };
+  } // namespace
+
   timer::timer(io_context &ctx)
       : ctx_(ctx),
         worker_(
@@ -68,21 +81,7 @@ namespace vix::async::core
 
   void timer::stop() noexcept
   {
-    {
-      std::lock_guard<std::mutex> lock(m_);
-      stop_ = true;
-      q_.clear();
-    }
-
-    cv_.notify_all();
-  }
-
-  void timer::schedule(time_point tp, std::unique_ptr<job> j, cancel_token ct)
-  {
-    if (!j)
-    {
-      return;
-    }
+    std::vector<std::function<void()>> stop_handlers;
 
     {
       std::lock_guard<std::mutex> lock(m_);
@@ -92,13 +91,89 @@ namespace vix::async::core
         return;
       }
 
-      entry e;
-      e.when = tp;
-      e.id = ++seq_;
-      e.ct = std::move(ct);
-      e.j = std::move(j);
+      stop_ = true;
 
-      q_.insert(std::move(e));
+      for (auto it = q_.begin(); it != q_.end(); ++it)
+      {
+        auto &entry_ref = const_cast<entry &>(*it);
+        if (entry_ref.on_stop)
+        {
+          stop_handlers.emplace_back(std::move(entry_ref.on_stop));
+        }
+      }
+
+      q_.clear();
+    }
+
+    cv_.notify_all();
+
+    for (auto &handler : stop_handlers)
+    {
+      try
+      {
+        if (handler)
+        {
+          handler();
+        }
+      }
+      catch (...)
+      {
+      }
+    }
+  }
+
+  bool timer::stopped() const noexcept
+  {
+    std::lock_guard<std::mutex> lock(m_);
+    return stop_;
+  }
+
+  void timer::schedule(
+      time_point tp,
+      std::unique_ptr<job> j,
+      cancel_token ct,
+      std::function<void()> on_stop)
+  {
+    if (!j)
+    {
+      return;
+    }
+
+    bool rejected = false;
+
+    {
+      std::lock_guard<std::mutex> lock(m_);
+
+      if (stop_)
+      {
+        rejected = true;
+      }
+      else
+      {
+        entry e;
+        e.when = tp;
+        e.id = ++seq_;
+        e.ct = std::move(ct);
+        e.j = std::move(j);
+        e.on_stop = std::move(on_stop);
+
+        q_.insert(std::move(e));
+      }
+    }
+
+    if (rejected)
+    {
+      if (on_stop)
+      {
+        try
+        {
+          on_stop();
+        }
+        catch (...)
+        {
+        }
+      }
+      return;
     }
 
     cv_.notify_all();
@@ -109,32 +184,106 @@ namespace vix::async::core
     struct awaitable
     {
       timer *self{};
-      duration d{};
-      cancel_token ct{};
+      duration delay{};
+      cancel_token token{};
+      std::shared_ptr<sleep_state> state{};
 
-      bool await_ready() const noexcept
+      bool await_ready()
       {
-        return d.count() == 0 || ct.is_cancelled();
+        if (token.is_cancelled())
+        {
+          return true;
+        }
+
+        if (self->stopped())
+        {
+          return true;
+        }
+
+        return delay <= duration::zero();
       }
 
       void await_suspend(std::coroutine_handle<> h)
       {
-        self->after(
-            d,
-            [timer_self = self, h]() mutable
+        state = std::make_shared<sleep_state>();
+        state->continuation = h;
+
+        auto finish = [timer_self = self,
+                       weak = std::weak_ptr<sleep_state>(state)](errc result) mutable
+        {
+          auto shared = weak.lock();
+          if (!shared)
+          {
+            return;
+          }
+
+          bool expected = false;
+          if (!shared->completed.compare_exchange_strong(
+                  expected,
+                  true,
+                  std::memory_order_acq_rel,
+                  std::memory_order_acquire))
+          {
+            return;
+          }
+
+          shared->outcome.store(result, std::memory_order_release);
+
+          if (timer_self && shared->continuation)
+          {
+            timer_self->ctx_post_handle(shared->continuation);
+          }
+        };
+
+        state->cancellation = token.on_cancel(
+            [finish]() mutable
             {
-              if (timer_self && h)
-              {
-                timer_self->ctx_post_handle(h);
-              }
+              finish(errc::canceled);
+            });
+
+        self->schedule(
+            clock::now() + delay,
+            make_job(
+                [finish]() mutable
+                {
+                  finish(errc::ok);
+                }),
+            {},
+            [finish]() mutable
+            {
+              finish(errc::stopped);
             });
       }
 
       void await_resume()
       {
-        if (ct.is_cancelled())
+        if (!state)
         {
+          if (token.is_cancelled())
+          {
+            throw std::system_error(cancelled_ec());
+          }
+
+          if (self->stopped())
+          {
+            throw std::system_error(make_error_code(errc::stopped));
+          }
+
+          return;
+        }
+
+        state->cancellation.reset();
+
+        switch (state->outcome.load(std::memory_order_acquire))
+        {
+        case errc::ok:
+          return;
+        case errc::canceled:
           throw std::system_error(cancelled_ec());
+        case errc::stopped:
+          throw std::system_error(make_error_code(errc::stopped));
+        default:
+          throw std::system_error(make_error_code(errc::stopped));
         }
       }
     };
@@ -175,8 +324,12 @@ namespace vix::async::core
         }
 
         auto it = q_.begin();
-        next = entry{it->when, it->id, it->ct, nullptr};
-        next.j = std::move(const_cast<entry &>(*it).j);
+        auto &front = const_cast<entry &>(*it);
+        next.when = front.when;
+        next.id = front.id;
+        next.ct = front.ct;
+        next.j = std::move(front.j);
+        next.on_stop = std::move(front.on_stop);
         q_.erase(it);
         has_next = true;
       }
@@ -198,6 +351,12 @@ namespace vix::async::core
 
         if (stop_)
         {
+          if (next.on_stop)
+          {
+            auto on_stop = std::move(next.on_stop);
+            lock.unlock();
+            on_stop();
+          }
           return;
         }
 
@@ -210,25 +369,30 @@ namespace vix::async::core
                 next.when,
                 next.id,
                 next.ct,
-                std::move(next.j)});
+                std::move(next.j),
+                std::move(next.on_stop)});
 
-            next = entry{it->when, it->id, it->ct, nullptr};
-            next.j = std::move(const_cast<entry &>(*it).j);
+            auto &front = const_cast<entry &>(*it);
+            next.when = front.when;
+            next.id = front.id;
+            next.ct = front.ct;
+            next.j = std::move(front.j);
+            next.on_stop = std::move(front.on_stop);
             q_.erase(it);
             continue;
           }
         }
 
-        cv_.wait_until(
-            lock,
-            next.when,
-            [this]()
-            {
-              return stop_;
-            });
+        cv_.wait_until(lock, next.when);
 
         if (stop_)
         {
+          if (next.on_stop)
+          {
+            auto on_stop = std::move(next.on_stop);
+            lock.unlock();
+            on_stop();
+          }
           return;
         }
       }

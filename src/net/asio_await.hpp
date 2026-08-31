@@ -6,7 +6,7 @@
  *  Copyright 2025, Gaspard Kirira.  All rights reserved.
  *  https://github.com/vixcpp/vix
  *  Use of this source code is governed by a MIT license
- *  that can be found in the License file.
+ *  that can be found in the LICENSE file.
  *
  *  Vix.cpp
  *
@@ -14,8 +14,10 @@
 #ifndef VIX_ASYNC_ASIO_AWAIT_HPP
 #define VIX_ASYNC_ASIO_AWAIT_HPP
 
+#include <atomic>
 #include <coroutine>
 #include <exception>
+#include <functional>
 #include <optional>
 #include <system_error>
 #include <type_traits>
@@ -25,58 +27,28 @@
 #include <vix/async/core/error.hpp>
 #include <vix/async/core/io_context.hpp>
 
+#include "asio_net_service.hpp"
+
 namespace vix::async::net::detail
 {
-  /**
-   * @brief Result container for Asio-backed async operations returning T.
-   *
-   * Stores the completion error code and the produced value, when present.
-   *
-   * @tparam T Result type.
-   */
   template <typename T>
   struct asio_result
   {
-    /**
-     * @brief Completion error code.
-     */
     std::error_code ec{};
-
-    /**
-     * @brief Result value, present only on success.
-     */
     std::optional<T> value{};
   };
 
-  /**
-   * @brief Result container specialization for void operations.
-   */
   template <>
   struct asio_result<void>
   {
-    /**
-     * @brief Completion error code.
-     */
     std::error_code ec{};
   };
 
-  /**
-   * @brief Convert std::error_code to std::system_error.
-   *
-   * @param ec Error code.
-   * @return Matching std::system_error.
-   */
   inline std::system_error to_system_error(const std::error_code &ec)
   {
     return std::system_error(ec);
   }
 
-  /**
-   * @brief Resume a coroutine through the owning Vix async scheduler fast path.
-   *
-   * @param ctx Owning io_context.
-   * @param h Coroutine handle to resume.
-   */
   inline void resume_on_ctx(
       vix::async::core::io_context *ctx,
       std::coroutine_handle<> h) noexcept
@@ -92,82 +64,82 @@ namespace vix::async::net::detail
       return;
     }
 
-    auto &sched = ctx->get_scheduler();
-
-    if (sched.stop_requested())
-    {
-      h.resume();
-      return;
-    }
-
-    ctx->post(h);
+    ctx->post_handle(h);
   }
 
-  /**
-   * @brief Coroutine awaitable bridging an Asio async operation into Vix task flow.
-   *
-   * Contract:
-   * - T = void   => starter must invoke completion as: done(std::error_code)
-   * - T != void  => starter must invoke completion as: done(std::error_code, T)
-   *
-   * Behavior:
-   * - captures completion result or exception
-   * - resumes awaiting coroutine through io_context fast coroutine path
-   * - checks cancellation before and after suspension
-   *
-   * @tparam Starter Callable that starts the underlying Asio operation.
-   * @tparam T Result type of the operation.
-   */
   template <typename Starter, typename T>
   struct asio_awaitable
   {
-    /**
-     * @brief Owning io_context used for coroutine resumption.
-     */
     vix::async::core::io_context *ctx{};
-
-    /**
-     * @brief Optional cancellation token.
-     */
+    asio_net_service *service{};
     vix::async::core::cancel_token ct{};
-
-    /**
-     * @brief Callable that starts the underlying Asio operation.
-     */
     Starter starter;
+    std::function<void()> cancel_action{};
 
-    /**
-     * @brief Stored completion result.
-     */
     asio_result<T> res{};
-
-    /**
-     * @brief Stored exception thrown while starting the operation.
-     */
     std::exception_ptr ex{};
+    vix::async::core::cancel_registration cancel_registration{};
+    asio_net_service::operation_registration service_registration{};
+    std::atomic<int> phase{0};
+    std::atomic<bool> stopped_by_service{false};
 
-    /**
-     * @brief Always suspend to let Asio complete asynchronously.
-     *
-     * @return false
-     */
     bool await_ready() const noexcept
     {
       return false;
     }
 
-    /**
-     * @brief Start the Asio operation and arrange coroutine resumption.
-     *
-     * @param h Awaiting coroutine handle.
-     */
+    void complete(std::coroutine_handle<> h) noexcept
+    {
+      int expected = 0;
+      if (phase.compare_exchange_strong(
+              expected,
+              2,
+              std::memory_order_acq_rel,
+              std::memory_order_acquire))
+      {
+        return;
+      }
+
+      expected = 1;
+      if (phase.compare_exchange_strong(
+              expected,
+              2,
+              std::memory_order_acq_rel,
+              std::memory_order_acquire))
+      {
+        resume_on_ctx(ctx, h);
+      }
+    }
+
+    void arm_or_resume(std::coroutine_handle<> h) noexcept
+    {
+      int expected = 0;
+      if (phase.compare_exchange_strong(
+              expected,
+              1,
+              std::memory_order_acq_rel,
+              std::memory_order_acquire))
+      {
+        return;
+      }
+
+      if (expected == 2)
+      {
+        resume_on_ctx(ctx, h);
+      }
+    }
+
     void await_suspend(std::coroutine_handle<> h)
     {
       if (ct.is_cancelled())
       {
-        resume_on_ctx(ctx, h);
+        res.ec = vix::async::core::cancelled_ec();
+        complete(h);
+        arm_or_resume(h);
         return;
       }
+
+      bool operation_started = false;
 
       try
       {
@@ -177,7 +149,7 @@ namespace vix::async::net::detail
               [this, h](std::error_code ec) mutable
               {
                 res.ec = ec;
-                resume_on_ctx(ctx, h);
+                complete(h);
               });
         }
         else
@@ -192,29 +164,66 @@ namespace vix::async::net::detail
                   res.value.emplace(std::move(value));
                 }
 
-                resume_on_ctx(ctx, h);
+                complete(h);
               });
         }
+
+        operation_started = true;
       }
       catch (...)
       {
         ex = std::current_exception();
-        resume_on_ctx(ctx, h);
+        complete(h);
       }
+
+      if (operation_started && cancel_action)
+      {
+        cancel_registration = ct.on_cancel(
+            [cancel = cancel_action]() mutable
+            {
+              try
+              {
+                cancel();
+              }
+              catch (...)
+              {
+              }
+            });
+
+        if (service)
+        {
+          service_registration = service->register_operation(
+              [this, cancel = cancel_action]() mutable
+              {
+                stopped_by_service.store(true, std::memory_order_release);
+                try
+                {
+                  cancel();
+                }
+                catch (...)
+                {
+                }
+              });
+        }
+      }
+
+      arm_or_resume(h);
     }
 
-    /**
-     * @brief Complete the await and return the Asio result.
-     *
-     * @return T for value-producing operations, void otherwise.
-     * @throws std::system_error on cancellation or I/O failure.
-     * @throws Rethrows any exception raised while starting the Asio operation.
-     */
     T await_resume()
     {
+      cancel_registration.reset();
+      service_registration.reset();
+
       if (ct.is_cancelled())
       {
         throw std::system_error(vix::async::core::cancelled_ec());
+      }
+
+      if (stopped_by_service.load(std::memory_order_acquire))
+      {
+        throw std::system_error(
+            vix::async::core::make_error_code(vix::async::core::errc::stopped));
       }
 
       if (ex)
