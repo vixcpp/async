@@ -52,7 +52,7 @@ namespace vix::async::core
    *
    * Lifecycle:
    * - Services are created on first use
-   * - shutdown() stops the scheduler and destroys all services
+     * - shutdown() stops services, then stops the scheduler
    * - destruction is safe and idempotent
    *
    * Thread-safety:
@@ -208,11 +208,21 @@ namespace vix::async::core
     [[nodiscard]] vix::async::net::detail::asio_net_service &net();
 
     /**
+     * @brief Obtain shared ownership of the networking backend.
+     *
+     * This is primarily used by network objects so their Asio executor remains
+     * alive until those objects are destroyed, even after io_context shutdown.
+     */
+    [[nodiscard]] std::shared_ptr<vix::async::net::detail::asio_net_service>
+    net_shared();
+
+    /**
      * @brief Stop scheduler and destroy all services.
      *
      * This function:
-     * - stops the scheduler
-     * - destroys all lazily created services
+     * - destroys all lazily created services while the scheduler can still
+     *   accept their final completion posts
+     * - stops the scheduler after service shutdown
      *
      * It is safe to call multiple times.
      */
@@ -256,7 +266,7 @@ namespace vix::async::core
     std::unique_ptr<signal_set> signals_;
 
     /** @brief Networking backend (lazy). */
-    std::unique_ptr<vix::async::net::detail::asio_net_service> net_;
+    std::shared_ptr<vix::async::net::detail::asio_net_service> net_;
 
     /** @brief Ensures shutdown runs once. */
     std::atomic<bool> shutdown_done_{false};

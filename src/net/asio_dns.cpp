@@ -29,6 +29,7 @@
 #endif
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 #include <utility>
@@ -38,28 +39,34 @@ namespace vix::async::net
 {
   namespace detail
   {
-    template <typename Starter>
+    template <typename Starter, typename Cancel>
     inline vix::async::core::task<void> co_asio_void(
         core::io_context &ctx,
         core::cancel_token ct,
-        Starter &&starter)
+        Starter &&starter,
+        Cancel &&cancel)
     {
       co_await asio_awaitable<std::decay_t<Starter>, void>{
           &ctx,
+          &ctx.net(),
           std::move(ct),
-          std::forward<Starter>(starter)};
+          std::forward<Starter>(starter),
+          std::function<void()>(std::forward<Cancel>(cancel))};
     }
 
-    template <typename T, typename Starter>
+    template <typename T, typename Starter, typename Cancel>
     inline vix::async::core::task<T> co_asio_value(
         core::io_context &ctx,
         core::cancel_token ct,
-        Starter &&starter)
+        Starter &&starter,
+        Cancel &&cancel)
     {
       co_return co_await asio_awaitable<std::decay_t<Starter>, T>{
           &ctx,
+          &ctx.net(),
           std::move(ct),
-          std::forward<Starter>(starter)};
+          std::forward<Starter>(starter),
+          std::function<void()>(std::forward<Cancel>(cancel))};
     }
   } // namespace detail
 
@@ -68,7 +75,8 @@ namespace vix::async::net
   public:
     explicit dns_resolver_asio(vix::async::core::io_context &ctx)
         : ctx_(ctx),
-          res_(ctx_.net().asio_ctx())
+          service_(ctx_.net_shared()),
+          res_(std::make_shared<asio::ip::tcp::resolver>(service_->asio_ctx()))
     {
     }
 
@@ -83,7 +91,7 @@ namespace vix::async::net
               ct,
               [&](auto done)
               {
-                res_.async_resolve(
+                res_->async_resolve(
                     host,
                     std::to_string(port),
                     [done = std::move(done)](
@@ -91,6 +99,15 @@ namespace vix::async::net
                         asio::ip::tcp::resolver::results_type r) mutable
                     {
                       done(ec, std::move(r));
+                    });
+              },
+              [resolver = res_]()
+              {
+                asio::post(
+                    resolver->get_executor(),
+                    [resolver]()
+                    {
+                      resolver->cancel();
                     });
               });
 
@@ -110,7 +127,8 @@ namespace vix::async::net
 
   private:
     core::io_context &ctx_;
-    asio::ip::tcp::resolver res_;
+    std::shared_ptr<detail::asio_net_service> service_;
+    std::shared_ptr<asio::ip::tcp::resolver> res_;
   };
 
   std::unique_ptr<dns_resolver> make_dns_resolver(core::io_context &ctx)

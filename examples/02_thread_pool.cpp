@@ -35,12 +35,14 @@ static task<void> app(io_context &ctx)
   assert(a != 0 || b != 0 || c != 0);
 
   // Fire-and-forget job
-  ctx.cpu_pool().submit([]
-                        {
+  const bool accepted = ctx.cpu_pool().post([]
+                                            {
     // This runs on a worker thread
     volatile int x = 0;
     for (int i = 0; i < 100000; ++i)
       x += i; });
+
+  assert(accepted);
 
   std::cout << "[async] demo done\n";
   ctx.stop();

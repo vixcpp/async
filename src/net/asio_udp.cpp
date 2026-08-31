@@ -19,6 +19,7 @@
 
 #include <asio/ip/udp.hpp>
 
+#include <functional>
 #include <memory>
 #include <span>
 #include <string>
@@ -31,28 +32,34 @@ namespace vix::async::net
 
   namespace detail
   {
-    template <typename Starter>
+    template <typename Starter, typename Cancel>
     inline vix::async::core::task<void> co_asio_void(
         core::io_context &ctx,
         core::cancel_token ct,
-        Starter &&starter)
+        Starter &&starter,
+        Cancel &&cancel)
     {
       co_await asio_awaitable<std::decay_t<Starter>, void>{
           &ctx,
+          &ctx.net(),
           std::move(ct),
-          std::forward<Starter>(starter)};
+          std::forward<Starter>(starter),
+          std::function<void()>(std::forward<Cancel>(cancel))};
     }
 
-    template <typename T, typename Starter>
+    template <typename T, typename Starter, typename Cancel>
     inline vix::async::core::task<T> co_asio_value(
         core::io_context &ctx,
         core::cancel_token ct,
-        Starter &&starter)
+        Starter &&starter,
+        Cancel &&cancel)
     {
       co_return co_await asio_awaitable<std::decay_t<Starter>, T>{
           &ctx,
+          &ctx.net(),
           std::move(ct),
-          std::forward<Starter>(starter)};
+          std::forward<Starter>(starter),
+          std::function<void()>(std::forward<Cancel>(cancel))};
     }
   } // namespace detail
 
@@ -61,7 +68,8 @@ namespace vix::async::net
   public:
     explicit udp_socket_asio(vix::async::core::io_context &ctx)
         : ctx_(ctx),
-          sock_(ctx_.net().asio_ctx())
+          service_(ctx_.net_shared()),
+          sock_(std::make_shared<udp::socket>(service_->asio_ctx()))
     {
     }
 
@@ -71,13 +79,13 @@ namespace vix::async::net
 
       std::error_code ec;
 
-      sock_.open(ep.protocol(), ec);
+      sock_->open(ep.protocol(), ec);
       if (ec)
       {
         throw std::system_error(ec);
       }
 
-      sock_.bind(ep, ec);
+      sock_->bind(ep, ec);
       if (ec)
       {
         throw std::system_error(ec);
@@ -98,7 +106,7 @@ namespace vix::async::net
           ct,
           [&](auto done)
           {
-            sock_.async_send_to(
+            sock_->async_send_to(
                 asio::buffer(buf.data(), buf.size()),
                 dst,
                 [done = std::move(done)](
@@ -106,6 +114,16 @@ namespace vix::async::net
                     std::size_t bytes) mutable
                 {
                   done(ec, bytes);
+                });
+          },
+          [sock = sock_]()
+          {
+            asio::post(
+                sock->get_executor(),
+                [sock]()
+                {
+                  std::error_code ec;
+                  sock->cancel(ec);
                 });
           });
     }
@@ -121,7 +139,7 @@ namespace vix::async::net
           ct,
           [&](auto done)
           {
-            sock_.async_receive_from(
+            sock_->async_receive_from(
                 asio::buffer(buf.data(), buf.size()),
                 src,
                 [done = std::move(done)](
@@ -129,6 +147,16 @@ namespace vix::async::net
                     std::size_t bytes) mutable
                 {
                   done(ec, bytes);
+                });
+          },
+          [sock = sock_]()
+          {
+            asio::post(
+                sock->get_executor(),
+                [sock]()
+                {
+                  std::error_code ec;
+                  sock->cancel(ec);
                 });
           });
 
@@ -144,25 +172,26 @@ namespace vix::async::net
     {
       std::error_code ec;
 
-      if (!sock_.is_open())
+      if (!sock_ || !sock_->is_open())
       {
         return;
       }
 
-      sock_.cancel(ec);
+      sock_->cancel(ec);
       ec.clear();
 
-      sock_.close(ec);
+      sock_->close(ec);
     }
 
     bool is_open() const noexcept override
     {
-      return sock_.is_open();
+      return sock_ && sock_->is_open();
     }
 
   private:
     vix::async::core::io_context &ctx_;
-    udp::socket sock_;
+    std::shared_ptr<detail::asio_net_service> service_;
+    std::shared_ptr<udp::socket> sock_;
   };
 
   std::unique_ptr<udp_socket> make_udp_socket(vix::async::core::io_context &ctx)

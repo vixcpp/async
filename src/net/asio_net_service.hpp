@@ -3,8 +3,10 @@
  *  @file asio_net_service.hpp
  *  @author Gaspard Kirira
  *
- *  Copyright 2025, Gaspard Kirira.  All rights reserved.
+ *  Copyright 2025, Gaspard Kirira.
+ *  All rights reserved.
  *  https://github.com/vixcpp/vix
+ *
  *  Use of this source code is governed by a MIT license
  *  that can be found in the License file.
  *
@@ -13,6 +15,13 @@
  */
 #ifndef VIX_ASYNC_ASIO_NET_SERVICE_HPP
 #define VIX_ASYNC_ASIO_NET_SERVICE_HPP
+
+#include <atomic>
+#include <functional>
+#include <memory>
+#include <mutex>
+#include <thread>
+#include <vector>
 
 #if defined(__GNUC__) || defined(__clang__)
 #pragma GCC diagnostic push
@@ -26,39 +35,163 @@
 #pragma GCC diagnostic pop
 #endif
 
-#include <atomic>
-#include <memory>
-#include <thread>
-
 namespace vix::async::core
 {
   class io_context;
 }
-
 namespace vix::async::net::detail
 {
+  /**
+   * @brief Internal Asio-backed networking service for the async runtime.
+   *
+   * asio_net_service hosts an independent asio::io_context running on a
+   * dedicated network thread. It is designed as a lazy service owned by
+   * vix::async::core::io_context and provides access to the underlying
+   * asio::io_context for implementing async networking primitives.
+   *
+   * Lifetime model:
+   * - Constructed with a reference to the core io_context (for integration)
+   * - Uses a work guard to keep the Asio io_context alive
+   * - Runs ioc_.run() on net_thread_
+   * - stop() releases the guard and stops the Asio context
+   */
   class asio_net_service
   {
-  public:
-    using guard_t = asio::executor_work_guard<asio::io_context::executor_type>;
+    struct operation_state
+    {
+      std::atomic<bool> active{true};
+      std::function<void()> cancel{};
+    };
 
+  public:
+    class operation_registration
+    {
+    public:
+      operation_registration() noexcept = default;
+
+      explicit operation_registration(
+          std::shared_ptr<operation_state> state) noexcept
+          : state_(std::move(state))
+      {
+      }
+
+      operation_registration(operation_registration &&other) noexcept
+          : state_(std::move(other.state_))
+      {
+      }
+
+      operation_registration &operator=(operation_registration &&other) noexcept
+      {
+        if (this != &other)
+        {
+          reset();
+          state_ = std::move(other.state_);
+        }
+        return *this;
+      }
+
+      operation_registration(const operation_registration &) = delete;
+      operation_registration &operator=(const operation_registration &) = delete;
+
+      ~operation_registration()
+      {
+        reset();
+      }
+
+      void reset() noexcept
+      {
+        if (state_)
+        {
+          state_->active.store(false, std::memory_order_release);
+          state_.reset();
+        }
+      }
+
+    private:
+      std::shared_ptr<operation_state> state_{};
+    };
+
+    /**
+     * @brief Construct the Asio networking service.
+     *
+     * Typically created lazily by vix::async::core::io_context::net().
+     *
+     * @param ctx Core io_context used by the runtime.
+     */
     explicit asio_net_service(vix::async::core::io_context &ctx);
+
+    /**
+     * @brief Destroy the service.
+     *
+     * Ensures the network thread is stopped and joined.
+     */
     ~asio_net_service();
 
+    /**
+     * @brief asio_net_service is non-copyable.
+     */
     asio_net_service(const asio_net_service &) = delete;
+
+    /**
+     * @brief asio_net_service is non-copyable.
+     */
     asio_net_service &operator=(const asio_net_service &) = delete;
 
+    /**
+     * @brief Access the underlying Asio io_context.
+     *
+     * @return Reference to asio::io_context.
+     */
     asio::io_context &asio_ctx() noexcept { return ioc_; }
+
+    /**
+     * @brief Stop the networking service.
+     *
+     * Releases the work guard (if any), stops the Asio io_context,
+     * and requests the network thread to exit.
+     */
     void stop() noexcept;
 
     void join() noexcept;
 
-  private:
-    asio::io_context ioc_;
-    std::unique_ptr<guard_t> guard_;
-    std::thread net_thread_;
-    std::atomic_bool stopped_{false};
-  };
-}
+    [[nodiscard]] bool stopped() const noexcept
+    {
+      return stopped_.load(std::memory_order_acquire);
+    }
 
-#endif
+    operation_registration register_operation(std::function<void()> cancel);
+
+  public:
+    /**
+     * @brief Work guard type used to keep asio_ctx() running.
+     */
+    using guard_t = asio::executor_work_guard<asio::io_context::executor_type>;
+
+  private:
+    /**
+     * @brief Asio io_context used for networking operations.
+     */
+    asio::io_context ioc_;
+
+    /**
+     * @brief Work guard instance (null when stopped).
+     */
+    std::unique_ptr<guard_t> guard_;
+
+    /**
+     * @brief Dedicated thread running the Asio event loop.
+     */
+    std::thread net_thread_;
+
+    /**
+     * @brief Indicates whether stop() has been requested.
+     */
+    std::atomic_bool stopped_{false};
+
+    std::mutex operations_mutex_;
+    std::vector<std::weak_ptr<operation_state>> operations_;
+  };
+
+} // namespace vix::async::net::detail
+
+#endif // VIX_ASYNC_ASIO_NET_SERVICE_HPP

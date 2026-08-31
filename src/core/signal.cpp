@@ -14,9 +14,11 @@
 #include <vix/async/core/signal.hpp>
 #include <vix/async/core/io_context.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <coroutine>
 #include <functional>
+#include <memory>
 #include <system_error>
 #include <thread>
 #include <utility>
@@ -29,7 +31,6 @@
 
 namespace vix::async::core
 {
-
   signal_set::signal_set(io_context &ctx)
       : ctx_(ctx)
   {
@@ -48,7 +49,13 @@ namespace vix::async::core
 
     if (worker_.get_id() == self_id)
     {
-      worker_.detach();
+      try
+      {
+        worker_.detach();
+      }
+      catch (...)
+      {
+      }
       return;
     }
 
@@ -70,25 +77,32 @@ namespace vix::async::core
 
   void signal_set::add(int sig)
   {
+    if (sig <= 0)
+    {
+      throw std::system_error(make_error_code(errc::invalid_argument));
+    }
+
+#if defined(__unix__) || defined(__APPLE__)
+    sigset_t set;
+    sigemptyset(&set);
+    sigaddset(&set, sig);
+    pthread_sigmask(SIG_BLOCK, &set, nullptr);
+#endif
+
     std::lock_guard<std::mutex> lock(m_);
-    signals_.push_back(sig);
+
+    if (std::find(signals_.begin(), signals_.end(), sig) == signals_.end())
+    {
+      signals_.push_back(sig);
+    }
   }
 
   void signal_set::remove(int sig)
   {
     std::lock_guard<std::mutex> lock(m_);
-
-    for (auto it = signals_.begin(); it != signals_.end();)
-    {
-      if (*it == sig)
-      {
-        it = signals_.erase(it);
-      }
-      else
-      {
-        ++it;
-      }
-    }
+    signals_.erase(
+        std::remove(signals_.begin(), signals_.end(), sig),
+        signals_.end());
   }
 
   void signal_set::on_signal(std::function<void(int)> fn)
@@ -99,15 +113,50 @@ namespace vix::async::core
 
   void signal_set::stop() noexcept
   {
-    std::lock_guard<std::mutex> lock(m_);
-    stop_ = true;
+    std::shared_ptr<wait_state> waiter;
+    int wake_signal = 0;
+
+    {
+      std::lock_guard<std::mutex> lock(m_);
+
+      if (stop_)
+      {
+        return;
+      }
+
+      stop_ = true;
+      wake_signal = wake_signal_;
+      waiter = std::move(waiter_);
+    }
+
+    if (waiter &&
+        !waiter->completed.exchange(true, std::memory_order_acq_rel))
+    {
+      waiter->outcome = errc::stopped;
+      ctx_post_handle(waiter->continuation);
+    }
+
+#if defined(__unix__) || defined(__APPLE__)
+    if (wake_signal > 0 && worker_.joinable())
+    {
+      try
+      {
+        pthread_kill(worker_.native_handle(), wake_signal);
+      }
+      catch (...)
+      {
+      }
+    }
+#else
+    (void)wake_signal;
+#endif
   }
 
   void signal_set::start_if_needed()
   {
     std::lock_guard<std::mutex> lock(m_);
 
-    if (started_)
+    if (started_ || stop_)
     {
       return;
     }
@@ -141,17 +190,34 @@ namespace vix::async::core
     struct awaitable
     {
       signal_set *self{};
-      cancel_token ct{};
-      int sig{0};
+      cancel_token token{};
+      std::shared_ptr<wait_state> state{std::make_shared<wait_state>()};
+      cancel_registration cancellation{};
 
       bool await_ready()
       {
         std::lock_guard<std::mutex> lock(self->m_);
 
+        if (token.is_cancelled())
+        {
+          state->outcome = errc::canceled;
+          state->completed.store(true, std::memory_order_release);
+          return true;
+        }
+
+        if (self->stop_)
+        {
+          state->outcome = errc::stopped;
+          state->completed.store(true, std::memory_order_release);
+          return true;
+        }
+
         if (!self->pending_.empty())
         {
-          sig = self->pending_.front();
+          state->signal = self->pending_.front();
           self->pending_.pop();
+          state->outcome = errc::ok;
+          state->completed.store(true, std::memory_order_release);
           return true;
         }
 
@@ -160,35 +226,93 @@ namespace vix::async::core
 
       void await_suspend(std::coroutine_handle<> h)
       {
-        std::lock_guard<std::mutex> lock(self->m_);
+        state->continuation = h;
+        bool resume_now = false;
 
-        if (ct.is_cancelled())
+        {
+          std::lock_guard<std::mutex> lock(self->m_);
+
+          if (token.is_cancelled())
+          {
+            state->outcome = errc::canceled;
+            state->completed.store(true, std::memory_order_release);
+            resume_now = true;
+          }
+          else if (self->stop_)
+          {
+            state->outcome = errc::stopped;
+            state->completed.store(true, std::memory_order_release);
+            resume_now = true;
+          }
+          else if (!self->pending_.empty())
+          {
+            state->signal = self->pending_.front();
+            self->pending_.pop();
+            state->outcome = errc::ok;
+            state->completed.store(true, std::memory_order_release);
+            resume_now = true;
+          }
+          else if (self->waiter_)
+          {
+            state->outcome = errc::not_ready;
+            state->completed.store(true, std::memory_order_release);
+            resume_now = true;
+          }
+          else
+          {
+            self->waiter_ = state;
+          }
+        }
+
+        if (resume_now)
         {
           self->ctx_post_handle(h);
           return;
         }
 
-        if (!self->pending_.empty())
-        {
-          sig = self->pending_.front();
-          self->pending_.pop();
+        cancellation = token.on_cancel(
+            [signal_self = self,
+             weak = std::weak_ptr<wait_state>(state)]()
+            {
+              auto shared = weak.lock();
+              if (!shared)
+              {
+                return;
+              }
 
-          self->ctx_post_handle(h);
-          return;
-        }
+              {
+                std::lock_guard<std::mutex> lock(signal_self->m_);
+                if (signal_self->waiter_ == shared)
+                {
+                  signal_self->waiter_.reset();
+                }
+              }
 
-        self->waiter_ = h;
-        self->waiter_active_ = true;
+              if (!shared->completed.exchange(true, std::memory_order_acq_rel))
+              {
+                shared->outcome = errc::canceled;
+                signal_self->ctx_post_handle(shared->continuation);
+              }
+            });
       }
 
       int await_resume()
       {
-        if (ct.is_cancelled())
-        {
-          throw std::system_error(cancelled_ec());
-        }
+        cancellation.reset();
 
-        return sig;
+        switch (state->outcome)
+        {
+        case errc::ok:
+          return state->signal;
+        case errc::canceled:
+          throw std::system_error(cancelled_ec());
+        case errc::stopped:
+          throw std::system_error(make_error_code(errc::stopped));
+        case errc::not_ready:
+          throw std::system_error(make_error_code(errc::not_ready));
+        default:
+          throw std::system_error(make_error_code(state->outcome));
+        }
       }
     };
 
@@ -203,7 +327,7 @@ namespace vix::async::core
 #else
     while (true)
     {
-      std::vector<int> sigs_copy;
+      std::vector<int> signals;
 
       {
         std::lock_guard<std::mutex> lock(m_);
@@ -213,95 +337,82 @@ namespace vix::async::core
           return;
         }
 
-        sigs_copy = signals_;
+        signals = signals_;
       }
 
-      if (sigs_copy.empty())
+      if (signals.empty())
       {
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
         continue;
       }
 
       sigset_t set;
       sigemptyset(&set);
 
-      for (int s : sigs_copy)
+      for (int signal : signals)
       {
-        sigaddset(&set, s);
+        sigaddset(&set, signal);
       }
 
       pthread_sigmask(SIG_BLOCK, &set, nullptr);
 
+      {
+        std::lock_guard<std::mutex> lock(m_);
+        if (stop_)
+        {
+          return;
+        }
+        wake_signal_ = signals.front();
+      }
+
       int received = 0;
       const int rc = sigwait(&set, &received);
 
-      if (rc != 0)
-      {
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
-        continue;
-      }
+      std::shared_ptr<wait_state> waiter;
+      std::function<void(int)> handler;
 
       {
         std::lock_guard<std::mutex> lock(m_);
+        wake_signal_ = 0;
 
         if (stop_)
         {
           return;
         }
 
-        pending_.push(received);
+        if (rc != 0)
+        {
+          continue;
+        }
+
+        handler = on_signal_;
+
+        if (waiter_)
+        {
+          waiter = std::move(waiter_);
+        }
+        else
+        {
+          pending_.push(received);
+        }
       }
 
-      ctx_post(
-          [this]()
-          {
-            int sig = 0;
-            std::function<void(int)> handler;
-            std::coroutine_handle<> waiter;
-            bool has_waiter = false;
-
+      if (handler)
+      {
+        ctx_post(
+            [handler = std::move(handler), received]() mutable
             {
-              std::lock_guard<std::mutex> lock(m_);
+              handler(received);
+            });
+      }
 
-              if (pending_.empty())
-              {
-                return;
-              }
-
-              sig = pending_.front();
-              pending_.pop();
-
-              handler = on_signal_;
-
-              if (waiter_active_)
-              {
-                waiter = waiter_;
-                waiter_ = {};
-                waiter_active_ = false;
-                has_waiter = true;
-              }
-            }
-
-            if (handler)
-            {
-              handler(sig);
-            }
-
-            if (has_waiter && waiter)
-            {
-              {
-                std::lock_guard<std::mutex> lock(m_);
-                pending_.push(sig);
-              }
-
-              ctx_post_handle(waiter);
-            }
-            else
-            {
-              std::lock_guard<std::mutex> lock(m_);
-              pending_.push(sig);
-            }
-          });
+      if (waiter &&
+          !waiter->completed.exchange(true, std::memory_order_acq_rel))
+      {
+        waiter->signal = received;
+        waiter->outcome = errc::ok;
+        ctx_post_handle(waiter->continuation);
+      }
     }
 #endif
   }

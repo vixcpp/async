@@ -17,8 +17,11 @@
 #define VIX_ASYNC_ASIO_NET_SERVICE_HPP
 
 #include <atomic>
+#include <functional>
 #include <memory>
+#include <mutex>
 #include <thread>
+#include <vector>
 
 #if defined(__GNUC__) || defined(__clang__)
 #pragma GCC diagnostic push
@@ -54,7 +57,60 @@ namespace vix::async::net::detail
    */
   class asio_net_service
   {
+    struct operation_state
+    {
+      std::atomic<bool> active{true};
+      std::function<void()> cancel{};
+    };
+
   public:
+    class operation_registration
+    {
+    public:
+      operation_registration() noexcept = default;
+
+      explicit operation_registration(
+          std::shared_ptr<operation_state> state) noexcept
+          : state_(std::move(state))
+      {
+      }
+
+      operation_registration(operation_registration &&other) noexcept
+          : state_(std::move(other.state_))
+      {
+      }
+
+      operation_registration &operator=(operation_registration &&other) noexcept
+      {
+        if (this != &other)
+        {
+          reset();
+          state_ = std::move(other.state_);
+        }
+        return *this;
+      }
+
+      operation_registration(const operation_registration &) = delete;
+      operation_registration &operator=(const operation_registration &) = delete;
+
+      ~operation_registration()
+      {
+        reset();
+      }
+
+      void reset() noexcept
+      {
+        if (state_)
+        {
+          state_->active.store(false, std::memory_order_release);
+          state_.reset();
+        }
+      }
+
+    private:
+      std::shared_ptr<operation_state> state_{};
+    };
+
     /**
      * @brief Construct the Asio networking service.
      *
@@ -98,6 +154,13 @@ namespace vix::async::net::detail
 
     void join() noexcept;
 
+    [[nodiscard]] bool stopped() const noexcept
+    {
+      return stopped_.load(std::memory_order_acquire);
+    }
+
+    operation_registration register_operation(std::function<void()> cancel);
+
   public:
     /**
      * @brief Work guard type used to keep asio_ctx() running.
@@ -124,6 +187,9 @@ namespace vix::async::net::detail
      * @brief Indicates whether stop() has been requested.
      */
     std::atomic_bool stopped_{false};
+
+    std::mutex operations_mutex_;
+    std::vector<std::weak_ptr<operation_state>> operations_;
   };
 
 } // namespace vix::async::net::detail

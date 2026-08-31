@@ -16,13 +16,133 @@
 #ifndef VIX_ASYNC_CANCEL_HPP
 #define VIX_ASYNC_CANCEL_HPP
 
+#include <algorithm>
 #include <atomic>
+#include <condition_variable>
+#include <functional>
 #include <memory>
+#include <mutex>
+#include <utility>
+#include <vector>
+#include <thread>
 
 #include <vix/async/core/error.hpp>
 
 namespace vix::async::core
 {
+  namespace detail
+  {
+    struct cancel_callback_state
+    {
+      mutable std::mutex mutex{};
+      std::condition_variable cv{};
+      bool active{true};
+      bool running{false};
+      std::thread::id running_thread{};
+      std::function<void()> fn{};
+
+      bool begin() noexcept
+      {
+        std::lock_guard<std::mutex> lock(mutex);
+        if (!active)
+        {
+          return false;
+        }
+
+        active = false;
+        running = true;
+        running_thread = std::this_thread::get_id();
+        return true;
+      }
+
+      void finish() noexcept
+      {
+        {
+          std::lock_guard<std::mutex> lock(mutex);
+          running = false;
+          running_thread = {};
+        }
+        cv.notify_all();
+      }
+
+      void deactivate() noexcept
+      {
+        std::unique_lock<std::mutex> lock(mutex);
+        active = false;
+
+        if (running && running_thread != std::this_thread::get_id())
+        {
+          cv.wait(lock, [this]()
+                  { return !running; });
+        }
+      }
+
+      bool is_active() const noexcept
+      {
+        std::lock_guard<std::mutex> lock(mutex);
+        return active;
+      }
+    };
+  } // namespace detail
+
+  /**
+   * @brief RAII registration for one cancellation callback.
+   *
+   * Destroying or resetting the registration prevents a callback that has not
+   * already started from being invoked by a later cancellation request.
+   */
+  class cancel_registration
+  {
+  public:
+    cancel_registration() noexcept = default;
+
+    explicit cancel_registration(
+        std::shared_ptr<detail::cancel_callback_state> state) noexcept
+        : state_(std::move(state))
+    {
+    }
+
+    cancel_registration(cancel_registration &&other) noexcept
+        : state_(std::move(other.state_))
+    {
+    }
+
+    cancel_registration &operator=(cancel_registration &&other) noexcept
+    {
+      if (this != &other)
+      {
+        reset();
+        state_ = std::move(other.state_);
+      }
+      return *this;
+    }
+
+    cancel_registration(const cancel_registration &) = delete;
+    cancel_registration &operator=(const cancel_registration &) = delete;
+
+    ~cancel_registration()
+    {
+      reset();
+    }
+
+    void reset() noexcept
+    {
+      if (state_)
+      {
+        state_->deactivate();
+        state_.reset();
+      }
+    }
+
+    [[nodiscard]] bool active() const noexcept
+    {
+      return state_ && state_->is_active();
+    }
+
+  private:
+    std::shared_ptr<detail::cancel_callback_state> state_{};
+  };
+
   /**
    * @brief Shared cancellation state.
    *
@@ -43,7 +163,48 @@ namespace vix::async::core
      */
     void request_cancel() noexcept
     {
-      cancelled_.store(true, std::memory_order_release);
+      if (cancelled_.exchange(true, std::memory_order_acq_rel))
+      {
+        return;
+      }
+
+      std::vector<std::shared_ptr<detail::cancel_callback_state>> callbacks;
+
+      {
+        std::lock_guard<std::mutex> lock(callbacks_mutex_);
+
+        auto out = callbacks_.begin();
+        for (auto it = callbacks_.begin(); it != callbacks_.end(); ++it)
+        {
+          if (auto callback = it->lock())
+          {
+            callbacks.push_back(callback);
+            *out++ = *it;
+          }
+        }
+        callbacks_.erase(out, callbacks_.end());
+      }
+
+      for (auto &callback : callbacks)
+      {
+        if (!callback || !callback->begin())
+        {
+          continue;
+        }
+
+        try
+        {
+          if (callback->fn)
+          {
+            callback->fn();
+          }
+        }
+        catch (...)
+        {
+        }
+
+        callback->finish();
+      }
     }
 
     /**
@@ -56,11 +217,67 @@ namespace vix::async::core
       return cancelled_.load(std::memory_order_acquire);
     }
 
+    cancel_registration subscribe(std::function<void()> fn)
+    {
+      if (!fn)
+      {
+        return {};
+      }
+
+      auto callback = std::make_shared<detail::cancel_callback_state>();
+      callback->fn = std::move(fn);
+
+      bool invoke_now = false;
+
+      {
+        std::lock_guard<std::mutex> lock(callbacks_mutex_);
+
+        if (cancelled_.load(std::memory_order_acquire))
+        {
+          invoke_now = true;
+        }
+        else
+        {
+          callbacks_.erase(
+              std::remove_if(
+                  callbacks_.begin(),
+                  callbacks_.end(),
+                  [](const auto &entry)
+                  {
+                    return entry.expired();
+                  }),
+              callbacks_.end());
+          callbacks_.push_back(callback);
+        }
+      }
+
+      cancel_registration registration{callback};
+
+      if (invoke_now && callback->begin())
+      {
+        try
+        {
+          callback->fn();
+        }
+        catch (...)
+        {
+        }
+
+
+        callback->finish();
+      }
+
+      return registration;
+    }
+
   private:
     /**
      * @brief Atomic cancellation flag.
      */
     std::atomic<bool> cancelled_{false};
+
+    mutable std::mutex callbacks_mutex_;
+    std::vector<std::weak_ptr<detail::cancel_callback_state>> callbacks_;
   };
 
   /**
@@ -105,6 +322,23 @@ namespace vix::async::core
     bool is_cancelled() const noexcept
     {
       return st_ ? st_->is_cancelled() : false;
+    }
+
+    /**
+     * @brief Register a callback invoked once when cancellation is requested.
+     *
+     * If cancellation was already requested, the callback is invoked during
+     * this call. The returned registration disables future invocation when it
+     * is destroyed or reset.
+     */
+    cancel_registration on_cancel(std::function<void()> fn) const
+    {
+      if (!st_)
+      {
+        return {};
+      }
+
+      return st_->subscribe(std::move(fn));
     }
 
   private:

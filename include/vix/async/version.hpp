@@ -23,21 +23,21 @@ namespace vix::async
    *
    * Incremented when incompatible API changes are introduced.
    */
-  inline constexpr int version_major = 0;
+  inline constexpr int version_major = 1;
 
   /**
    * @brief Minor version number.
    *
    * Incremented when functionality is added in a backward-compatible manner.
    */
-  inline constexpr int version_minor = 1;
+  inline constexpr int version_minor = 2;
 
   /**
    * @brief Patch version number.
    *
    * Incremented when backward-compatible bug fixes are made.
    */
-  inline constexpr int version_patch = 0;
+  inline constexpr int version_patch = 1;
 
   /**
    * @brief Optional pre-release identifier.
@@ -62,7 +62,7 @@ namespace vix::async
    *
    * Example: "0.1.0", "1.2.0-rc.1+githash".
    */
-  inline constexpr const char *version_string = "0.1.0";
+  inline constexpr const char *version_string = "1.2.1";
 
   /**
    * @brief ABI version number.
@@ -70,7 +70,7 @@ namespace vix::async
    * Incremented whenever a binary-incompatible change is introduced.
    * This allows consumers to detect ABI mismatches at compile or link time.
    */
-  inline constexpr int abi_version = 0;
+  inline constexpr int abi_version = 1;
 
 } // namespace vix::async
 

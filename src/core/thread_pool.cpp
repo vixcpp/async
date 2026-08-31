@@ -16,15 +16,24 @@
 
 #include <coroutine>
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <thread>
 #include <utility>
 
 namespace vix::async::core
 {
+  struct thread_pool::shared_state
+  {
+    mutable std::mutex mutex;
+    std::condition_variable cv;
+    std::deque<std::function<void()>> queue;
+    bool stop{false};
+  };
 
   thread_pool::thread_pool(io_context &ctx, std::size_t threads)
-      : ctx_(ctx)
+      : ctx_(ctx),
+        state_(std::make_shared<shared_state>())
   {
     if (threads == 0)
     {
@@ -35,10 +44,11 @@ namespace vix::async::core
 
     for (std::size_t i = 0; i < threads; ++i)
     {
+      auto state = state_;
       workers_.emplace_back(
-          [this]()
+          [state = std::move(state)]() mutable
           {
-            worker_loop();
+            worker_loop(std::move(state));
           });
     }
   }
@@ -48,24 +58,42 @@ namespace vix::async::core
     shutdown();
   }
 
-  void thread_pool::submit(std::function<void()> fn)
+  bool thread_pool::post(std::function<void()> fn)
   {
     if (!fn)
     {
-      return;
+      return false;
     }
 
-    enqueue(std::move(fn));
+    return enqueue_shared(state_, std::move(fn));
+  }
+
+  bool thread_pool::stopped() const noexcept
+  {
+    const auto state = state_;
+    if (!state)
+    {
+      return true;
+    }
+
+    std::lock_guard<std::mutex> lock(state->mutex);
+    return state->stop;
   }
 
   void thread_pool::stop() noexcept
   {
+    const auto state = state_;
+    if (!state)
     {
-      std::lock_guard<std::mutex> lock(m_);
-      stop_ = true;
+      return;
     }
 
-    cv_.notify_all();
+    {
+      std::lock_guard<std::mutex> lock(state->mutex);
+      state->stop = true;
+    }
+
+    state->cv.notify_all();
   }
 
   void thread_pool::shutdown() noexcept
@@ -80,37 +108,38 @@ namespace vix::async::core
       return;
     }
 
-    {
-      std::lock_guard<std::mutex> lock(m_);
-      stop_ = true;
-    }
-
-    cv_.notify_all();
+    stop();
 
     const std::thread::id self_id = std::this_thread::get_id();
 
-    for (auto &t : workers_)
+    for (auto &thread : workers_)
     {
-      if (!t.joinable())
+      if (!thread.joinable())
       {
         continue;
       }
 
-      if (t.get_id() == self_id)
+      if (thread.get_id() == self_id)
       {
-        t.detach();
+        try
+        {
+          thread.detach();
+        }
+        catch (...)
+        {
+        }
         continue;
       }
 
       try
       {
-        t.join();
+        thread.join();
       }
       catch (...)
       {
         try
         {
-          t.detach();
+          thread.detach();
         }
         catch (...)
         {
@@ -121,43 +150,56 @@ namespace vix::async::core
     workers_.clear();
   }
 
-  void thread_pool::enqueue(std::function<void()> fn)
+  bool thread_pool::enqueue_shared(
+      const std::shared_ptr<shared_state> &state,
+      std::function<void()> fn)
   {
+    if (!state || !fn)
     {
-      std::lock_guard<std::mutex> lock(m_);
-
-      if (stop_)
-      {
-        return;
-      }
-
-      q_.emplace_back(std::move(fn));
+      return false;
     }
 
-    cv_.notify_one();
+    {
+      std::lock_guard<std::mutex> lock(state->mutex);
+
+      if (state->stop)
+      {
+        return false;
+      }
+
+      state->queue.emplace_back(std::move(fn));
+    }
+
+    state->cv.notify_one();
+    return true;
   }
 
-  void thread_pool::worker_loop()
+  void thread_pool::worker_loop(std::shared_ptr<shared_state> state)
   {
+    if (!state)
+    {
+      return;
+    }
+
     while (true)
     {
       std::function<void()> fn;
 
       {
-        std::unique_lock<std::mutex> lock(m_);
-        cv_.wait(
+        std::unique_lock<std::mutex> lock(state->mutex);
+        state->cv.wait(
             lock,
-            [this]()
+            [&state]()
             {
-              return stop_ || !q_.empty();
+              return state->stop || !state->queue.empty();
             });
 
-        if (!q_.empty())
+        if (!state->queue.empty())
         {
-          fn = std::move(q_.front());
-          q_.pop_front();
+          fn = std::move(state->queue.front());
+          state->queue.pop_front();
         }
-        else if (stop_)
+        else if (state->stop)
         {
           break;
         }
@@ -178,9 +220,22 @@ namespace vix::async::core
     }
   }
 
-  void thread_pool::ctx_post(std::coroutine_handle<> h)
+  void thread_pool::post_to_context(
+      io_context *ctx,
+      std::coroutine_handle<> h) noexcept
   {
-    ctx_.post_handle(h);
+    if (!h)
+    {
+      return;
+    }
+
+    if (!ctx)
+    {
+      h.resume();
+      return;
+    }
+
+    ctx->post_handle(h);
   }
 
 } // namespace vix::async::core

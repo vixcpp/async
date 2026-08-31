@@ -22,6 +22,7 @@
 #include <asio/read.hpp>
 #include <asio/write.hpp>
 
+#include <functional>
 #include <memory>
 #include <span>
 #include <string>
@@ -35,28 +36,34 @@ namespace vix::async::net
 
   namespace detail
   {
-    template <typename Starter>
+    template <typename Starter, typename Cancel>
     inline vix::async::core::task<void> co_asio_void(
         core::io_context &ctx,
         core::cancel_token ct,
-        Starter &&starter)
+        Starter &&starter,
+        Cancel &&cancel)
     {
       co_await asio_awaitable<std::decay_t<Starter>, void>{
           &ctx,
+          &ctx.net(),
           std::move(ct),
-          std::forward<Starter>(starter)};
+          std::forward<Starter>(starter),
+          std::function<void()>(std::forward<Cancel>(cancel))};
     }
 
-    template <typename T, typename Starter>
+    template <typename T, typename Starter, typename Cancel>
     inline vix::async::core::task<T> co_asio_value(
         core::io_context &ctx,
         core::cancel_token ct,
-        Starter &&starter)
+        Starter &&starter,
+        Cancel &&cancel)
     {
       co_return co_await asio_awaitable<std::decay_t<Starter>, T>{
           &ctx,
+          &ctx.net(),
           std::move(ct),
-          std::forward<Starter>(starter)};
+          std::forward<Starter>(starter),
+          std::function<void()>(std::forward<Cancel>(cancel))};
     }
   } // namespace detail
 
@@ -65,7 +72,8 @@ namespace vix::async::net
   public:
     explicit tcp_stream_asio(vix::async::core::io_context &ctx)
         : ctx_(ctx),
-          sock_(ctx_.net().asio_ctx())
+          service_(ctx_.net_shared()),
+          sock_(std::make_shared<tcp::socket>(service_->asio_ctx()))
     {
     }
 
@@ -73,7 +81,7 @@ namespace vix::async::net
         const tcp_endpoint &ep,
         vix::async::core::cancel_token ct) override
     {
-      tcp::resolver resolver(ctx_.net().asio_ctx());
+      auto resolver = std::make_shared<tcp::resolver>(service_->asio_ctx());
 
       auto results =
           co_await detail::co_asio_value<tcp::resolver::results_type>(
@@ -81,7 +89,7 @@ namespace vix::async::net
               ct,
               [&](auto done)
               {
-                resolver.async_resolve(
+                resolver->async_resolve(
                     ep.host,
                     std::to_string(ep.port),
                     [done = std::move(done)](
@@ -89,6 +97,15 @@ namespace vix::async::net
                         tcp::resolver::results_type r) mutable
                     {
                       done(ec, std::move(r));
+                    });
+              },
+              [resolver]()
+              {
+                asio::post(
+                    resolver->get_executor(),
+                    [resolver]()
+                    {
+                      resolver->cancel();
                     });
               });
 
@@ -98,13 +115,23 @@ namespace vix::async::net
           [&](auto done)
           {
             asio::async_connect(
-                sock_,
+                *sock_,
                 results,
                 [done = std::move(done)](
                     std::error_code ec,
                     const tcp::endpoint &) mutable
                 {
                   done(ec);
+                });
+          },
+          [sock = sock_]()
+          {
+            asio::post(
+                sock->get_executor(),
+                [sock]()
+                {
+                  std::error_code ec;
+                  sock->cancel(ec);
                 });
           });
 
@@ -120,13 +147,23 @@ namespace vix::async::net
           ct,
           [&](auto done)
           {
-            sock_.async_read_some(
+            sock_->async_read_some(
                 asio::buffer(buf.data(), buf.size()),
                 [done = std::move(done)](
                     std::error_code ec,
                     std::size_t bytes) mutable
                 {
                   done(ec, bytes);
+                });
+          },
+          [sock = sock_]()
+          {
+            asio::post(
+                sock->get_executor(),
+                [sock]()
+                {
+                  std::error_code ec;
+                  sock->cancel(ec);
                 });
           });
     }
@@ -140,13 +177,23 @@ namespace vix::async::net
           ct,
           [&](auto done)
           {
-            sock_.async_write_some(
+            sock_->async_write_some(
                 asio::buffer(buf.data(), buf.size()),
                 [done = std::move(done)](
                     std::error_code ec,
                     std::size_t bytes) mutable
                 {
                   done(ec, bytes);
+                });
+          },
+          [sock = sock_]()
+          {
+            asio::post(
+                sock->get_executor(),
+                [sock]()
+                {
+                  std::error_code ec;
+                  sock->cancel(ec);
                 });
           });
     }
@@ -155,38 +202,39 @@ namespace vix::async::net
     {
       std::error_code ec;
 
-      if (!sock_.is_open())
+      if (!sock_ || !sock_->is_open())
       {
         return;
       }
 
-      sock_.cancel(ec);
+      sock_->cancel(ec);
       ec.clear();
 
-      sock_.shutdown(tcp::socket::shutdown_both, ec);
+      sock_->shutdown(tcp::socket::shutdown_both, ec);
       ec.clear();
 
-      sock_.close(ec);
+      sock_->close(ec);
     }
 
     bool is_open() const noexcept override
     {
-      return sock_.is_open();
+      return sock_ && sock_->is_open();
     }
 
     tcp::socket &native() noexcept
     {
-      return sock_;
+      return *sock_;
     }
 
     int native_handle() override
     {
-      return static_cast<int>(sock_.native_handle());
+      return static_cast<int>(sock_->native_handle());
     }
 
   private:
     core::io_context &ctx_;
-    tcp::socket sock_;
+    std::shared_ptr<detail::asio_net_service> service_;
+    std::shared_ptr<tcp::socket> sock_;
   };
 
   class tcp_listener_asio final : public tcp_listener
@@ -194,7 +242,8 @@ namespace vix::async::net
   public:
     explicit tcp_listener_asio(core::io_context &ctx)
         : ctx_(ctx),
-          acc_(std::make_shared<tcp::acceptor>(ctx_.net().asio_ctx()))
+          service_(ctx_.net_shared()),
+          acc_(std::make_shared<tcp::acceptor>(service_->asio_ctx()))
     {
     }
 
@@ -264,6 +313,16 @@ namespace vix::async::net
 
                   done(ec);
                 });
+          },
+          [acc]()
+          {
+            asio::post(
+                acc->get_executor(),
+                [acc]()
+                {
+                  std::error_code ec;
+                  acc->cancel(ec);
+                });
           });
 
       co_return std::unique_ptr<tcp_stream>(client.release());
@@ -326,6 +385,7 @@ namespace vix::async::net
 
   private:
     vix::async::core::io_context &ctx_;
+    std::shared_ptr<detail::asio_net_service> service_;
     std::shared_ptr<tcp::acceptor> acc_;
     std::atomic_bool open_{false};
     std::atomic_bool closing_{false};

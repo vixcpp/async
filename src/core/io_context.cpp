@@ -42,14 +42,11 @@ namespace vix::async::core
 
     try
     {
-      sched_.stop();
-    }
-    catch (...)
-    {
-    }
-
-    try
-    {
+      if (net_)
+      {
+        net_->stop();
+        net_->join();
+      }
       net_.reset();
     }
     catch (...)
@@ -75,6 +72,14 @@ namespace vix::async::core
     try
     {
       cpu_pool_.reset();
+    }
+    catch (...)
+    {
+    }
+
+    try
+    {
+      sched_.stop();
     }
     catch (...)
     {
@@ -127,10 +132,24 @@ namespace vix::async::core
 
     if (!net_)
     {
-      net_ = std::make_unique<vix::async::net::detail::asio_net_service>(*this);
+      net_ = std::make_shared<vix::async::net::detail::asio_net_service>(*this);
     }
 
     return *net_;
+  }
+
+  std::shared_ptr<vix::async::net::detail::asio_net_service>
+  io_context::net_shared()
+  {
+    std::lock_guard<std::mutex> lock(lifecycle_mutex_);
+    ensure_not_shutdown();
+
+    if (!net_)
+    {
+      net_ = std::make_shared<vix::async::net::detail::asio_net_service>(*this);
+    }
+
+    return net_;
   }
 
 } // namespace vix::async::core
