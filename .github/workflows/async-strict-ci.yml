@@ -406,8 +406,16 @@ jobs:
               continue
             fi
 
+            # This example is an interactive daemon and intentionally does
+            # not exit until it receives a signal. It is not a suitable
+            # standalone Valgrind target in this loop.
+            if [[ "$base" == "async_example_03_tcp_echo_server" ]]; then
+              echo "==> Skipping interactive server example: $exe"
+              continue
+            fi
+
             echo "==> Valgrind: $exe"
-            timeout 20s valgrind \
+            timeout --kill-after=5s 20s valgrind \
               --leak-check=full \
               --show-leak-kinds=all \
               --track-origins=yes \
